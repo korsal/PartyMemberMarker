@@ -1,0 +1,7 @@
+## Interface: 50504
+## Title: PartyMembersMarker
+## Notes: Marks party members automatically
+## Author: Igor
+## Version: 0.1
+
+PartyMembersMarker.lua
