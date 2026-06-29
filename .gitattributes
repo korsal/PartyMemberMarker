@@ -1,0 +1,17 @@
+# Normalize all text files to LF in the repo and in the working tree.
+* text=auto eol=lf
+
+# WoW addon source files are text.
+*.lua  text eol=lf
+*.toc  text eol=lf
+*.xml  text eol=lf
+*.md   text eol=lf
+
+# Binary assets must not be line-ending normalized.
+*.png  binary
+
+# Files excluded from the release archive (git archive).
+docs/          export-ignore
+.gitattributes export-ignore
+.gitignore     export-ignore
+icon.png       export-ignore

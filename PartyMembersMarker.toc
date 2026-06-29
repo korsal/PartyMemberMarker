@@ -1,8 +1,8 @@
 ## Interface: 50504
 ## Title: PartyMembersMarker
-## Notes: Marks party members automatically
-## Author: Igor
-## Version: 0.1
+## Notes: Clean friendly nameplates (name-only) with guild/occupation and a class-icon badge for group members
+## Author: reisal
+## Version: 1.0.0
 ## SavedVariables: PartyMembersMarkerDB
 
 PartyMembersMarker.lua
