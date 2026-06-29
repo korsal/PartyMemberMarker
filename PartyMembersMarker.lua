@@ -26,7 +26,7 @@ local ICON_BORDER     = 4          -- class-colored rim thickness around the ico
 -- Blizzard nameplate regions we suppress for friendly units. The native name
 -- is hidden via the UpdateName hook below (we draw our own instead).
 local BAR_REGIONS = { "healthBar", "castBar", "LevelFrame", "ClassificationFrame",
-                      "RaidTargetFrame", "RaidTargetIcon" }
+                      "RaidTargetFrame" }
 
 local function SetRegionsShown(plate, shown)
     local uf = plate.UnitFrame
@@ -231,6 +231,17 @@ local function ApplyFriendly(plate, unitToken)
     local uf = plate.UnitFrame
     if uf and uf.name then uf.name:Hide() end
 
+    -- The native raid marker (RaidTargetFrame) is re-shown by uf:UpdateRaidTarget
+    -- when the marker changes; hook its Show once per plate to keep it hidden
+    -- for friendly units.
+    local rt = uf and uf.RaidTargetFrame
+    if rt and not rt.pmmHooked then
+        rt.pmmHooked = true
+        hooksecurefunc(rt, "Show", function(self)
+            if uf.unit and IsFriendlyUnit(uf.unit) then self:Hide() end
+        end)
+    end
+
     local t = GetText(plate)
     if not t then return end
 
@@ -337,18 +348,6 @@ if CompactUnitFrame_UpdateName then
     end)
 end
 
--- Same for the native raid target marker, which Blizzard re-shows whenever
--- the marker changes.
-if CompactUnitFrame_UpdateRaidTargetIcon then
-    hooksecurefunc("CompactUnitFrame_UpdateRaidTargetIcon", function(uf)
-        local unit = uf and uf.unit
-        if not unit or not unit:match("^nameplate") then return end
-        if IsFriendlyUnit(unit) then
-            if uf.RaidTargetFrame then uf.RaidTargetFrame:Hide() end
-            if uf.RaidTargetIcon then uf.RaidTargetIcon:Hide() end
-        end
-    end)
-end
 
 -- Debug: /pmm dumps the tooltip lines of your current target.
 SLASH_PMM1 = "/pmm"
