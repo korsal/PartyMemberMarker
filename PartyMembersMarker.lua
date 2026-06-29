@@ -17,7 +17,15 @@ local OUTLINE_WIDTH   = 1          -- faux-outline offset, px
 local SHADOW          = true       -- engine-style drop shadow (matches default names)
 local SUB_SIZE_DELTA  = -2         -- sub line is this much smaller than name
 local VERTICAL_OFFSET = -10        -- nudge name up (+) / down (-), in px
+-- Strata for our text. Off the nameplate (so the non-target fade doesn't dim
+-- it) but kept LOW so raid/party frames (MEDIUM) draw on top of it.
+local TEXT_STRATA     = "BACKGROUND"
 -- ---------------------------------------------------------------------------
+
+-- Dedicated layer for all our FontStrings: a UIParent child (escapes the
+-- nameplate alpha fade) at a low strata (below raid/party frames).
+local layer = CreateFrame("Frame", nil, UIParent)
+layer:SetFrameStrata(TEXT_STRATA)
 
 -- Blizzard nameplate regions we suppress for friendly units. The native name
 -- is hidden via the UpdateName hook below (we draw our own instead).
@@ -109,15 +117,15 @@ local function MakeLabel(fontFile, size)
     local flag = OUTLINE_COLOR and "" or NAME_OUTLINE
     local label = { copies = {} }
 
-    -- Parent to UIParent so the non-target alpha fade Blizzard applies to
-    -- unselected plates doesn't dim our text.
-    local main = UIParent:CreateFontString(nil, "OVERLAY")
+    -- Parent to our low-strata layer (off the nameplate) so the non-target
+    -- alpha fade doesn't dim it and raid/party frames draw on top.
+    local main = layer:CreateFontString(nil, "OVERLAY")
     if fontFile then main:SetFont(fontFile, size, flag) end
     label.main = main
 
     if OUTLINE_COLOR then
         for _, d in ipairs(OUTLINE_DIRS) do
-            local c = UIParent:CreateFontString(nil, "ARTWORK")
+            local c = layer:CreateFontString(nil, "ARTWORK")
             if fontFile then c:SetFont(fontFile, size, flag) end
             c:SetTextColor(OUTLINE_COLOR[1], OUTLINE_COLOR[2], OUTLINE_COLOR[3], 1)
             c:SetPoint("CENTER", main, "CENTER", d[1] * OUTLINE_WIDTH, d[2] * OUTLINE_WIDTH)
