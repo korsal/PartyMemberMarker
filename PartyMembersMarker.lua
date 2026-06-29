@@ -18,6 +18,11 @@ local SHADOW          = true       -- engine-style drop shadow (matches default 
 local SUB_SIZE_DELTA  = -2         -- sub line is this much smaller than name
 local VERTICAL_OFFSET = -10        -- nudge name up (+) / down (-), in px
 local SHOW_CLASS_ICON = true       -- class icon above friendly *player* names
+-- Who gets the class icon (future: configurable via settings):
+--   "all"   - all friendly players
+--   "party" - only your party members
+--   "raid"  - only your raid members
+local ICON_SCOPE      = "party"
 local ICON_SIZE       = 48         -- class icon size, px
 local ICON_GAP        = 8          -- gap between icon bottom and name top, px
 local ICON_BORDER     = 4          -- class-colored rim thickness around the icon, px
@@ -222,6 +227,17 @@ local function IsFriendlyUnit(unitToken)
     return UnitIsFriend("player", unitToken)
 end
 
+-- Whether the class icon should show for this player, per ICON_SCOPE.
+local function PlayerInIconScope(unitToken)
+    if ICON_SCOPE == "all" then
+        return true
+    elseif ICON_SCOPE == "raid" then
+        return UnitInRaid(unitToken) and true or false
+    else -- "party"
+        return UnitInParty(unitToken) and true or false
+    end
+end
+
 local function ApplyFriendly(plate, unitToken)
     if not PMM.hidden[plate] then
         SetRegionsShown(plate, false)
@@ -259,9 +275,9 @@ local function ApplyFriendly(plate, unitToken)
         LabelHide(t.sub)
     end
 
-    -- Class icon: friendly players only, when the class is resolved.
+    -- Class icon: friendly players in scope, when the class is resolved.
     local coords
-    if SHOW_CLASS_ICON and UnitIsPlayer(unitToken) then
+    if SHOW_CLASS_ICON and UnitIsPlayer(unitToken) and PlayerInIconScope(unitToken) then
         local _, class = UnitClass(unitToken)
         coords = class and CLASS_ICON_TCOORDS and CLASS_ICON_TCOORDS[class]
     end
@@ -316,6 +332,7 @@ frame:RegisterEvent("PLAYER_LOGIN")
 frame:RegisterEvent("NAME_PLATE_UNIT_ADDED")
 frame:RegisterEvent("NAME_PLATE_UNIT_REMOVED")
 frame:RegisterEvent("PLAYER_FLAGS_CHANGED")
+frame:RegisterEvent("GROUP_ROSTER_UPDATE")
 
 frame:SetScript("OnEvent", function(self, event, unit)
     if event == "PLAYER_LOGIN" then
@@ -330,8 +347,8 @@ frame:SetScript("OnEvent", function(self, event, unit)
             RestorePlate(plate)
         end
 
-    elseif event == "PLAYER_FLAGS_CHANGED" then
-        -- AFK/DND toggled for some unit; refresh visible plates.
+    elseif event == "PLAYER_FLAGS_CHANGED" or event == "GROUP_ROSTER_UPDATE" then
+        -- AFK/DND toggled, or party/raid roster changed; refresh visible plates.
         UpdateAllNameplates()
     end
 end)
