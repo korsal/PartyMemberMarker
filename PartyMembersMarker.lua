@@ -36,6 +36,10 @@ local function GetIconSize()
     return (PartyMembersMarkerDB and PartyMembersMarkerDB.iconSize) or ICON_SIZE
 end
 
+local function GetIconScope()
+    return (PartyMembersMarkerDB and PartyMembersMarkerDB.iconScope) or ICON_SCOPE
+end
+
 -- Blizzard nameplate regions we suppress for friendly units. The native name
 -- is hidden via the UpdateName hook below (we draw our own instead).
 local BAR_REGIONS = { "healthBar", "castBar", "LevelFrame", "ClassificationFrame",
@@ -237,11 +241,12 @@ local function IsFriendlyUnit(unitToken)
     return UnitIsFriend("player", unitToken)
 end
 
--- Whether the class icon should show for this player, per ICON_SCOPE.
+-- Whether the class icon should show for this player, per the configured scope.
 local function PlayerInIconScope(unitToken)
-    if ICON_SCOPE == "all" then
+    local scope = GetIconScope()
+    if scope == "all" then
         return true
-    elseif ICON_SCOPE == "raid" then
+    elseif scope == "raid" then
         return UnitInRaid(unitToken) and true or false
     else -- "party"
         return UnitInParty(unitToken) and true or false
@@ -333,7 +338,9 @@ end
 local function UpdateAllNameplates()
     for _, plate in pairs(C_NamePlate.GetNamePlates()) do
         local unit = plate.namePlateUnitToken
-        if unit then UpdateNameplate(unit) end
+        -- pcall so one bad plate can't abort the whole refresh (which left
+        -- some plates stale when switching the icon scope).
+        if unit then pcall(UpdateNameplate, unit) end
     end
 end
 
@@ -350,6 +357,17 @@ end
 ------------------------------------------------------------
 -- Options panel (ESC -> Options -> AddOns), built once at login.
 ------------------------------------------------------------
+StaticPopupDialogs["PMM_RELOAD"] = {
+    text = "PartyMembersMarker: reload the UI to apply the icon scope change?",
+    button1 = "Reload",
+    button2 = CANCEL,
+    OnAccept = function() ReloadUI() end,
+    timeout = 0,
+    whileDead = true,
+    hideOnEscape = true,
+    preferredIndex = 3,
+}
+
 local optionsCategory
 
 local function SetupOptions()
@@ -444,11 +462,56 @@ local function SetupOptions()
     preview:SetPoint("LEFT", slider, "RIGHT", 60, 0)
     previewLabel:SetPoint("BOTTOM", preview, "TOP", 0, 8)
 
+    -- Icon scope: show the class icon for all / party / raid (radio group).
+    local scopeHeader = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    scopeHeader:SetPoint("TOPLEFT", slider, "BOTTOMLEFT", 0, -40)
+    scopeHeader:SetText("Show class icon for:")
+
+    local SCOPE_OPTIONS = {
+        { value = "all",   label = "All players" },
+        { value = "party", label = "Party members" },
+        { value = "raid",  label = "Raid members" },
+    }
+    local scopeButtons = {}
+
+    local function SyncScopeButtons()
+        local scope = GetIconScope()
+        for _, b in ipairs(scopeButtons) do
+            b:SetChecked(b.pmmValue == scope)
+        end
+    end
+
+    local prev = scopeHeader
+    for i, opt in ipairs(SCOPE_OPTIONS) do
+        local b = CreateFrame("CheckButton", nil, panel, "UIRadioButtonTemplate")
+        b.pmmValue = opt.value
+        if i == 1 then
+            b:SetPoint("TOPLEFT", scopeHeader, "BOTTOMLEFT", 4, -8)
+        else
+            b:SetPoint("TOPLEFT", prev, "BOTTOMLEFT", 0, -6)
+        end
+        local fs = b:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+        fs:SetPoint("LEFT", b, "RIGHT", 4, 0)
+        fs:SetText(opt.label)
+        b:SetScript("OnClick", function(self)
+            if PartyMembersMarkerDB then
+                PartyMembersMarkerDB.iconScope = self.pmmValue
+            end
+            SyncScopeButtons()
+            -- A reload applies the scope cleanly (live refresh can lag while
+            -- class data loads); offer it.
+            StaticPopup_Show("PMM_RELOAD")
+        end)
+        scopeButtons[#scopeButtons + 1] = b
+        prev = b
+    end
+
     panel:SetScript("OnShow", function()
         local size = GetIconSize()
         slider:SetValue(size)
         PMMIconSizeSliderText:SetText("Icon size: " .. size)
         UpdatePreview(size)
+        SyncScopeButtons()
     end)
 
     optionsCategory = Settings.RegisterCanvasLayoutCategory(panel, panel.name)
@@ -469,12 +532,16 @@ frame:RegisterEvent("NAME_PLATE_UNIT_ADDED")
 frame:RegisterEvent("NAME_PLATE_UNIT_REMOVED")
 frame:RegisterEvent("PLAYER_FLAGS_CHANGED")
 frame:RegisterEvent("GROUP_ROSTER_UPDATE")
+frame:RegisterEvent("UNIT_NAME_UPDATE")
 
 frame:SetScript("OnEvent", function(self, event, unit)
     if event == "PLAYER_LOGIN" then
         PartyMembersMarkerDB = PartyMembersMarkerDB or {}
         if type(PartyMembersMarkerDB.iconSize) ~= "number" then
             PartyMembersMarkerDB.iconSize = ICON_SIZE
+        end
+        if type(PartyMembersMarkerDB.iconScope) ~= "string" then
+            PartyMembersMarkerDB.iconScope = ICON_SCOPE
         end
         pcall(SetupOptions)
         print("|cff00ff00PartyMembersMarker|r: loaded")
@@ -491,6 +558,11 @@ frame:SetScript("OnEvent", function(self, event, unit)
     elseif event == "PLAYER_FLAGS_CHANGED" or event == "GROUP_ROSTER_UPDATE" then
         -- AFK/DND toggled, or party/raid roster changed; refresh visible plates.
         UpdateAllNameplates()
+
+    elseif event == "UNIT_NAME_UPDATE" then
+        -- Name/class info just arrived for a unit; refresh its plate so the
+        -- class icon can appear once the class is finally known.
+        if unit then pcall(UpdateNameplate, unit) end
     end
 end)
 
