@@ -17,6 +17,10 @@ local OUTLINE_WIDTH   = 1          -- faux-outline offset, px
 local SHADOW          = true       -- engine-style drop shadow (matches default names)
 local SUB_SIZE_DELTA  = -2         -- sub line is this much smaller than name
 local VERTICAL_OFFSET = -10        -- nudge name up (+) / down (-), in px
+local SHOW_CLASS_ICON = true       -- class icon above friendly *player* names
+local ICON_SIZE       = 48         -- class icon size, px
+local ICON_GAP        = 8          -- gap between icon bottom and name top, px
+local ICON_BORDER     = 4          -- class-colored rim thickness around the icon, px
 -- Strata for our text. Off the nameplate (so the non-target fade doesn't dim
 -- it) but kept LOW so raid/party frames (MEDIUM) draw on top of it.
 local TEXT_STRATA     = "BACKGROUND"
@@ -175,7 +179,39 @@ local function GetText(plate)
     local sub = MakeLabel(fontFile, math.max(fontHeight + SUB_SIZE_DELTA, 1))
     sub.main:SetPoint("TOP", name.main, "BOTTOM", 0, -1)
 
-    PMM.text[plate] = { name = name, sub = sub }
+    -- Class-colored ring behind the icon: a solid white square (tints
+    -- correctly), masked into a smooth circle, larger than the icon so its
+    -- rim shows as a colored border.
+    local border = layer:CreateTexture(nil, "ARTWORK", nil, -1)
+    border:SetTexture("Interface\\Buttons\\WHITE8X8")
+    border:SetSize(ICON_SIZE + ICON_BORDER * 2, ICON_SIZE + ICON_BORDER * 2)
+    border:Hide()
+
+    -- Class icon, sits above the name (used for friendly players only).
+    local icon = layer:CreateTexture(nil, "ARTWORK")
+    icon:SetSize(ICON_SIZE, ICON_SIZE)
+    icon:SetTexture("Interface\\TargetingFrame\\UI-Classes-Circles")
+    icon:SetPoint("BOTTOM", name.main, "TOP", 0, ICON_GAP)
+    icon:Hide()
+
+    border:SetPoint("CENTER", icon, "CENTER", 0, 0)
+
+    -- Smooth both circles' hard edges with a soft circle mask.
+    if layer.CreateMaskTexture then
+        local iconMask = layer:CreateMaskTexture()
+        iconMask:SetTexture("Interface\\Masks\\CircleMaskScalable",
+            "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+        iconMask:SetAllPoints(icon)
+        icon:AddMaskTexture(iconMask)
+
+        local borderMask = layer:CreateMaskTexture()
+        borderMask:SetTexture("Interface\\Masks\\CircleMaskScalable",
+            "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+        borderMask:SetAllPoints(border)
+        border:AddMaskTexture(borderMask)
+    end
+
+    PMM.text[plate] = { name = name, sub = sub, icon = icon, border = border }
     return PMM.text[plate]
 end
 
@@ -212,6 +248,22 @@ local function ApplyFriendly(plate, unitToken)
     else
         LabelHide(t.sub)
     end
+
+    -- Class icon: friendly players only, when the class is resolved.
+    local coords
+    if SHOW_CLASS_ICON and UnitIsPlayer(unitToken) then
+        local _, class = UnitClass(unitToken)
+        coords = class and CLASS_ICON_TCOORDS and CLASS_ICON_TCOORDS[class]
+    end
+    if coords then
+        t.icon:SetTexCoord(coords[1], coords[2], coords[3], coords[4])
+        t.icon:Show()
+        t.border:SetVertexColor(r, g, b)   -- class color (same as the name)
+        t.border:Show()
+    else
+        t.icon:Hide()
+        t.border:Hide()
+    end
 end
 
 local function RestorePlate(plate)
@@ -226,6 +278,8 @@ local function RestorePlate(plate)
     if t then
         LabelHide(t.name)
         LabelHide(t.sub)
+        t.icon:Hide()
+        t.border:Hide()
     end
 end
 
