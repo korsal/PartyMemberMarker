@@ -89,7 +89,10 @@ end
 
 local function GetNameColor(unitToken)
     if UnitIsPlayer(unitToken) then
-        return 1, 1, 1              -- player: white (matches the reference)
+        local _, class = UnitClass(unitToken)
+        local c = class and (CUSTOM_CLASS_COLORS or RAID_CLASS_COLORS)[class]
+        if c then return c.r, c.g, c.b end
+        return 1, 1, 1              -- fallback: white
     end
     local reaction = UnitReaction("player", unitToken)
     if reaction and reaction == 4 then
