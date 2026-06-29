@@ -69,15 +69,20 @@ builder → apply/restore → event wiring → secure hooks → debug slash comm
 
 ```lua
 PartyMembersMarkerDB = {
-    iconSize = 48,   -- class icon diameter in px (ICON_SIZE_MIN..ICON_SIZE_MAX)
+    iconSize  = 48,        -- class icon diameter in px (ICON_SIZE_MIN..ICON_SIZE_MAX)
+    iconScope = "party",   -- who gets the class icon: "all" | "party" | "raid"
 }
 ```
 
-Initialized on `PLAYER_LOGIN` (defaulting `iconSize` to `ICON_SIZE`). The icon
-size is read through `GetIconSize()` (DB value, else the `ICON_SIZE` default) so
-the rest of the code never touches the global directly. `RefreshIconSizes()`
-resizes the icon + ring on all live plates after the value changes (masks track
-their textures via `SetAllPoints`, so they follow automatically).
+Initialized on `PLAYER_LOGIN` (defaulting `iconSize` to `ICON_SIZE` and
+`iconScope` to `ICON_SCOPE`). Both are read through accessors so the rest of the
+code never touches the globals directly:
+
+- `GetIconSize()` — DB value, else the `ICON_SIZE` default. `RefreshIconSizes()`
+  resizes the icon + ring on all live plates after a change (masks track their
+  textures via `SetAllPoints`, so they follow automatically).
+- `GetIconScope()` — DB value, else the `ICON_SCOPE` default; used by
+  `PlayerInIconScope`. Changing it offers a UI reload to apply cleanly.
 
 Plates are keyed directly by the Blizzard nameplate frame returned from
 `C_NamePlate`. Nameplate frames are pooled and persistent, so caching widgets
@@ -160,17 +165,24 @@ Reachable via **ESC → Options → AddOns → PartyMembersMarker** or `/pmm con
   `Settings.OpenToCategory(optionsCategory:GetID())`. (This mirrors the sibling
   EnemyTotemMarker addon; MoP Classic 5.5.4 has the Settings API, so no legacy
   `InterfaceOptions` fallback is needed.)
-- Layout: title, then the **Icon size** slider (`OptionsSliderTemplate`,
+- Layout: title; the **Icon size** slider (`OptionsSliderTemplate`,
   `ICON_SIZE_MIN..ICON_SIZE_MAX`) with `±` arrow steppers (`MakeStepper`, using
-  the spellbook page-turn arrow textures), and a **live preview** badge to the
-  right of the slider showing the player's own class icon + class-colored ring.
-- On change the slider writes `PartyMembersMarkerDB.iconSize`, calls
+  the spellbook page-turn arrow textures) and a **live preview** badge to the
+  right of it (the player's own class icon + class-colored ring); then a
+  **"Show class icon for:"** radio group (`UIRadioButtonTemplate`) with **All
+  players** / **Party members** / **Raid members**.
+- Icon size: on change the slider writes `PartyMembersMarkerDB.iconSize`, calls
   `RefreshIconSizes()` (live update of all plates) and `UpdatePreview()`.
-  `OnShow` syncs the slider/preview to the current saved value.
+- Icon scope: clicking a radio writes `PartyMembersMarkerDB.iconScope`,
+  re-syncs the radios (`SyncScopeButtons`), and shows the **`PMM_RELOAD`**
+  `StaticPopup` offering a `ReloadUI()`. The reload applies the scope cleanly —
+  a live refresh lagged while class data streamed in (and could leave stale
+  icons), so a reload is preferred for this option.
+- `OnShow` syncs the slider, preview, and radio selection to the saved values.
 
 Adding more settings later: extend `PartyMembersMarkerDB`, add widgets in
-`SetupOptions`, and call the relevant refresh + `UpdateAllNameplates()` on
-change. `ICON_SCOPE` is the obvious next candidate (see Configuration).
+`SetupOptions`, and either refresh live (`RefreshIconSizes` /
+`UpdateAllNameplates`) or prompt a reload for options that don't apply cleanly.
 
 ---
 
@@ -191,6 +203,7 @@ change. `ICON_SCOPE` is the obvious next candidate (see Configuration).
 | `UpdateNameplate(unit)` | route to Apply/Restore by friendliness |
 | `UpdateAllNameplates()` | re-run `UpdateNameplate` for all visible plates |
 | `GetIconSize()` | current icon size (DB value, else `ICON_SIZE`) |
+| `GetIconScope()` | current icon scope (DB value, else `ICON_SCOPE`) |
 | `RefreshIconSizes()` | resize icon + ring on all live plates after a settings change |
 | `SetupOptions()` / `OpenOptions()` | build / open the settings panel |
 
@@ -204,6 +217,11 @@ Event frame:
 - `NAME_PLATE_UNIT_REMOVED` — `RestorePlate(plate)` (clean the pooled plate).
 - `PLAYER_FLAGS_CHANGED` / `GROUP_ROSTER_UPDATE` — `UpdateAllNameplates()`
   (refresh AFK/DND prefix and party/raid icon scope live).
+- `UNIT_NAME_UPDATE` — refresh that unit's plate so the class icon appears once
+  the class finally streams in.
+
+`UpdateAllNameplates()` wraps each plate update in `pcall` so one failing plate
+can't abort the whole refresh.
 
 Secure hooks (`hooksecurefunc`):
 
@@ -236,22 +254,20 @@ comes from `PartyMembersMarkerDB.iconSize` via `GetIconSize()` (slider range
 | `SUB_SIZE_DELTA` | `-2` | sub line size relative to name |
 | `VERTICAL_OFFSET` | `-10` | name vertical nudge (+ up / − down) |
 | `SHOW_CLASS_ICON` | `true` | class icon above friendly player names |
-| `ICON_SCOPE` | `"party"` | `"all"` / `"party"` / `"raid"` — who gets the icon |
+| `ICON_SCOPE` | `"party"` | `"all"` / `"party"` / `"raid"` — **default** for the DB-backed `iconScope` (configurable via the settings radio group) |
 | `ICON_SIZE` | `48` | class icon diameter, px — **default** for the DB-backed `iconSize` (configurable in the settings panel) |
 | `ICON_GAP` | `8` | gap between icon bottom and name top, px |
 | `ICON_BORDER` | `4` | class-colored ring thickness, px |
 
-### Planned settings UI
+### Icon scope mapping
 
-`ICON_SCOPE` is already isolated behind `PlayerInIconScope`. The three modes map
-directly to planned options:
+The scope is configurable in the settings panel (radio group), persisted as
+`PartyMembersMarkerDB.iconScope`, and read via `GetIconScope()` →
+`PlayerInIconScope`:
 
-- **Показывать на всех** → `"all"`
-- **Показывать только на группе** → `"party"`
-- **Показывать в рейд группе** → `"raid"`
-
-Wiring to a real settings panel later means: add SavedVariables, read the tunables
-from the DB at login, and call `UpdateAllNameplates()` after a change.
+- **All players** → `"all"`
+- **Party members** → `"party"`
+- **Raid members** → `"raid"`
 
 ---
 
