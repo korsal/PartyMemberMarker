@@ -76,6 +76,17 @@ local function GetSubText(unitToken)
     return GetUnitOccupation(unitToken)
 end
 
+-- Name with the AFK/DND status prefix (UnitName/UnitPVPName don't include it).
+local function GetDisplayName(unitToken)
+    local name = UnitPVPName(unitToken) or UnitName(unitToken) or ""
+    if UnitIsAFK(unitToken) then
+        return (CHAT_FLAG_AFK or "<Away> ") .. name
+    elseif UnitIsDND(unitToken) then
+        return (CHAT_FLAG_DND or "<Busy> ") .. name
+    end
+    return name
+end
+
 local function GetNameColor(unitToken)
     if UnitIsPlayer(unitToken) then
         return 1, 1, 1              -- player: white (matches the reference)
@@ -178,7 +189,7 @@ local function ApplyFriendly(plate, unitToken)
     if not t then return end
 
     local r, g, b = GetNameColor(unitToken)
-    LabelSetText(t.name, UnitPVPName(unitToken) or UnitName(unitToken))
+    LabelSetText(t.name, GetDisplayName(unitToken))
     LabelSetColor(t.name, r, g, b)
     LabelShow(t.name)
 
@@ -218,10 +229,18 @@ local function UpdateNameplate(unitToken)
     end
 end
 
+local function UpdateAllNameplates()
+    for _, plate in pairs(C_NamePlate.GetNamePlates()) do
+        local unit = plate.namePlateUnitToken
+        if unit then UpdateNameplate(unit) end
+    end
+end
+
 local frame = CreateFrame("Frame")
 frame:RegisterEvent("PLAYER_LOGIN")
 frame:RegisterEvent("NAME_PLATE_UNIT_ADDED")
 frame:RegisterEvent("NAME_PLATE_UNIT_REMOVED")
+frame:RegisterEvent("PLAYER_FLAGS_CHANGED")
 
 frame:SetScript("OnEvent", function(self, event, unit)
     if event == "PLAYER_LOGIN" then
@@ -235,6 +254,10 @@ frame:SetScript("OnEvent", function(self, event, unit)
         if plate then
             RestorePlate(plate)
         end
+
+    elseif event == "PLAYER_FLAGS_CHANGED" then
+        -- AFK/DND toggled for some unit; refresh visible plates.
+        UpdateAllNameplates()
     end
 end)
 
