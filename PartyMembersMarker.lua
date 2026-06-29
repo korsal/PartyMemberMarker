@@ -25,7 +25,8 @@ local ICON_BORDER     = 4          -- class-colored rim thickness around the ico
 
 -- Blizzard nameplate regions we suppress for friendly units. The native name
 -- is hidden via the UpdateName hook below (we draw our own instead).
-local BAR_REGIONS = { "healthBar", "castBar", "LevelFrame", "ClassificationFrame" }
+local BAR_REGIONS = { "healthBar", "castBar", "LevelFrame", "ClassificationFrame",
+                      "RaidTargetFrame", "RaidTargetIcon" }
 
 local function SetRegionsShown(plate, shown)
     local uf = plate.UnitFrame
@@ -336,6 +337,19 @@ if CompactUnitFrame_UpdateName then
     end)
 end
 
+-- Same for the native raid target marker, which Blizzard re-shows whenever
+-- the marker changes.
+if CompactUnitFrame_UpdateRaidTargetIcon then
+    hooksecurefunc("CompactUnitFrame_UpdateRaidTargetIcon", function(uf)
+        local unit = uf and uf.unit
+        if not unit or not unit:match("^nameplate") then return end
+        if IsFriendlyUnit(unit) then
+            if uf.RaidTargetFrame then uf.RaidTargetFrame:Hide() end
+            if uf.RaidTargetIcon then uf.RaidTargetIcon:Hide() end
+        end
+    end)
+end
+
 -- Debug: /pmm dumps the tooltip lines of your current target.
 SLASH_PMM1 = "/pmm"
 SlashCmdList["PMM"] = function()
@@ -353,9 +367,17 @@ SlashCmdList["PMM"] = function()
     end
 
     local plate = C_NamePlate.GetNamePlateForUnit(unit)
-    local nameRegion = plate and plate.UnitFrame and plate.UnitFrame.name
+    local uf = plate and plate.UnitFrame
+    local nameRegion = uf and uf.name
     if nameRegion then
         local f, h, flags = nameRegion:GetFont()
         print("|cff00ff00PMM|r native name font:", f, h, "flags:", flags == "" and "<none>" or flags)
+    end
+    if uf then
+        for k, v in pairs(uf) do
+            if type(k) == "string" and (k:lower():find("raid") or k:lower():find("target")) then
+                print("|cff00ff00PMM|r uf field:", k, type(v))
+            end
+        end
     end
 end
