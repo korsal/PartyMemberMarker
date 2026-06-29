@@ -21,15 +21,7 @@ local SHOW_CLASS_ICON = true       -- class icon above friendly *player* names
 local ICON_SIZE       = 48         -- class icon size, px
 local ICON_GAP        = 8          -- gap between icon bottom and name top, px
 local ICON_BORDER     = 4          -- class-colored rim thickness around the icon, px
--- Strata for our text. Off the nameplate (so the non-target fade doesn't dim
--- it) but kept LOW so raid/party frames (MEDIUM) draw on top of it.
-local TEXT_STRATA     = "BACKGROUND"
 -- ---------------------------------------------------------------------------
-
--- Dedicated layer for all our FontStrings: a UIParent child (escapes the
--- nameplate alpha fade) at a low strata (below raid/party frames).
-local layer = CreateFrame("Frame", nil, UIParent)
-layer:SetFrameStrata(TEXT_STRATA)
 
 -- Blizzard nameplate regions we suppress for friendly units. The native name
 -- is hidden via the UpdateName hook below (we draw our own instead).
@@ -117,19 +109,17 @@ end
 -- offset copies drawn behind it to fake a colored outline.
 local OUTLINE_DIRS = { {1,0}, {-1,0}, {0,1}, {0,-1}, {1,1}, {1,-1}, {-1,1}, {-1,-1} }
 
-local function MakeLabel(fontFile, size)
+local function MakeLabel(parent, fontFile, size)
     local flag = OUTLINE_COLOR and "" or NAME_OUTLINE
     local label = { copies = {} }
 
-    -- Parent to our low-strata layer (off the nameplate) so the non-target
-    -- alpha fade doesn't dim it and raid/party frames draw on top.
-    local main = layer:CreateFontString(nil, "OVERLAY")
+    local main = parent:CreateFontString(nil, "OVERLAY")
     if fontFile then main:SetFont(fontFile, size, flag) end
     label.main = main
 
     if OUTLINE_COLOR then
         for _, d in ipairs(OUTLINE_DIRS) do
-            local c = layer:CreateFontString(nil, "ARTWORK")
+            local c = parent:CreateFontString(nil, "ARTWORK")
             if fontFile then c:SetFont(fontFile, size, flag) end
             c:SetTextColor(OUTLINE_COLOR[1], OUTLINE_COLOR[2], OUTLINE_COLOR[3], 1)
             c:SetPoint("CENTER", main, "CENTER", d[1] * OUTLINE_WIDTH, d[2] * OUTLINE_WIDTH)
@@ -173,22 +163,30 @@ local function GetText(plate)
     local fontFile   = FONT_FILE or nativeFile
     local fontHeight = NAME_SIZE or nativeHeight or 12
 
-    local name = MakeLabel(fontFile, fontHeight)
+    -- Per-plate holder parented to the nameplate itself: this keeps our text
+    -- on the nameplate layer (so it interleaves correctly with other plates
+    -- and stays below UIParent raid/party frames). SetIgnoreParentAlpha keeps
+    -- it full-opacity even when the plate's non-target fade dims the parent.
+    local holder = CreateFrame("Frame", nil, plate)
+    holder:SetAllPoints(plate)
+    holder:SetIgnoreParentAlpha(true)
+
+    local name = MakeLabel(holder, fontFile, fontHeight)
     name.main:SetPoint("CENTER", uf, "CENTER", 0, VERTICAL_OFFSET)
 
-    local sub = MakeLabel(fontFile, math.max(fontHeight + SUB_SIZE_DELTA, 1))
+    local sub = MakeLabel(holder, fontFile, math.max(fontHeight + SUB_SIZE_DELTA, 1))
     sub.main:SetPoint("TOP", name.main, "BOTTOM", 0, -1)
 
     -- Class-colored ring behind the icon: a solid white square (tints
     -- correctly), masked into a smooth circle, larger than the icon so its
     -- rim shows as a colored border.
-    local border = layer:CreateTexture(nil, "ARTWORK", nil, -1)
+    local border = holder:CreateTexture(nil, "ARTWORK", nil, -1)
     border:SetTexture("Interface\\Buttons\\WHITE8X8")
     border:SetSize(ICON_SIZE + ICON_BORDER * 2, ICON_SIZE + ICON_BORDER * 2)
     border:Hide()
 
     -- Class icon, sits above the name (used for friendly players only).
-    local icon = layer:CreateTexture(nil, "ARTWORK")
+    local icon = holder:CreateTexture(nil, "ARTWORK")
     icon:SetSize(ICON_SIZE, ICON_SIZE)
     icon:SetTexture("Interface\\TargetingFrame\\UI-Classes-Circles")
     icon:SetPoint("BOTTOM", name.main, "TOP", 0, ICON_GAP)
@@ -197,14 +195,14 @@ local function GetText(plate)
     border:SetPoint("CENTER", icon, "CENTER", 0, 0)
 
     -- Smooth both circles' hard edges with a soft circle mask.
-    if layer.CreateMaskTexture then
-        local iconMask = layer:CreateMaskTexture()
+    if holder.CreateMaskTexture then
+        local iconMask = holder:CreateMaskTexture()
         iconMask:SetTexture("Interface\\Masks\\CircleMaskScalable",
             "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
         iconMask:SetAllPoints(icon)
         icon:AddMaskTexture(iconMask)
 
-        local borderMask = layer:CreateMaskTexture()
+        local borderMask = holder:CreateMaskTexture()
         borderMask:SetTexture("Interface\\Masks\\CircleMaskScalable",
             "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
         borderMask:SetAllPoints(border)
