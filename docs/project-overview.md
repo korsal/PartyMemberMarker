@@ -16,10 +16,13 @@ Files:
 
 ```
 PartyMembersMarker/
-├── PartyMembersMarker.toc   # Interface 50504 (MoP Classic), loads the .lua
+├── PartyMembersMarker.toc   # Interface 50504, SavedVariables: PartyMembersMarkerDB
 ├── PartyMembersMarker.lua   # entire addon (single file)
 └── docs/project-overview.md # this document
 ```
+
+Saved variables: `PartyMembersMarkerDB`. Slash command: `/pmm` (debug) /
+`/pmm config` (open settings).
 
 Target client: **MoP Classic 5.5.4** (interface `50504`), which runs on the
 modern engine. See `Compatibility / porting notes` for other Classic flavors.
@@ -61,6 +64,20 @@ builder → apply/restore → event wiring → secure hooks → debug slash comm
 - `PMM.hidden[plate] = true` — we have hidden this plate's bar regions.
 - `PMM.text[plate] = { name, sub, icon, border }` — our created widgets for the
   plate (cached; built lazily, reused as plates are recycled from the pool).
+
+### SavedVariables (`PartyMembersMarkerDB`)
+
+```lua
+PartyMembersMarkerDB = {
+    iconSize = 48,   -- class icon diameter in px (ICON_SIZE_MIN..ICON_SIZE_MAX)
+}
+```
+
+Initialized on `PLAYER_LOGIN` (defaulting `iconSize` to `ICON_SIZE`). The icon
+size is read through `GetIconSize()` (DB value, else the `ICON_SIZE` default) so
+the rest of the code never touches the global directly. `RefreshIconSizes()`
+resizes the icon + ring on all live plates after the value changes (masks track
+their textures via `SetAllPoints`, so they follow automatically).
 
 Plates are keyed directly by the Blizzard nameplate frame returned from
 `C_NamePlate`. Nameplate frames are pooled and persistent, so caching widgets
@@ -130,6 +147,33 @@ line 2 if it isn't a level/numeric line.
 
 ---
 
+## Settings panel
+
+Reachable via **ESC → Options → AddOns → PartyMembersMarker** or `/pmm config`.
+
+- Built once in `SetupOptions()`, called from `PLAYER_LOGIN` wrapped in `pcall`
+  so any UI/API mismatch can't break the rest of the addon. Guarded by
+  `if not (Settings and Settings.RegisterCanvasLayoutCategory) then return end`.
+- Registered with the modern **Settings canvas API**
+  (`Settings.RegisterCanvasLayoutCategory` + `RegisterAddOnCategory`); the
+  category handle is kept in `optionsCategory`. `OpenOptions()` opens it via
+  `Settings.OpenToCategory(optionsCategory:GetID())`. (This mirrors the sibling
+  EnemyTotemMarker addon; MoP Classic 5.5.4 has the Settings API, so no legacy
+  `InterfaceOptions` fallback is needed.)
+- Layout: title, then the **Icon size** slider (`OptionsSliderTemplate`,
+  `ICON_SIZE_MIN..ICON_SIZE_MAX`) with `±` arrow steppers (`MakeStepper`, using
+  the spellbook page-turn arrow textures), and a **live preview** badge to the
+  right of the slider showing the player's own class icon + class-colored ring.
+- On change the slider writes `PartyMembersMarkerDB.iconSize`, calls
+  `RefreshIconSizes()` (live update of all plates) and `UpdatePreview()`.
+  `OnShow` syncs the slider/preview to the current saved value.
+
+Adding more settings later: extend `PartyMembersMarkerDB`, add widgets in
+`SetupOptions`, and call the relevant refresh + `UpdateAllNameplates()` on
+change. `ICON_SCOPE` is the obvious next candidate (see Configuration).
+
+---
+
 ## Key functions
 
 | Function | Role |
@@ -146,12 +190,16 @@ line 2 if it isn't a level/numeric line.
 | `RestorePlate(plate)` | un-hide native bits, hide our widgets |
 | `UpdateNameplate(unit)` | route to Apply/Restore by friendliness |
 | `UpdateAllNameplates()` | re-run `UpdateNameplate` for all visible plates |
+| `GetIconSize()` | current icon size (DB value, else `ICON_SIZE`) |
+| `RefreshIconSizes()` | resize icon + ring on all live plates after a settings change |
+| `SetupOptions()` / `OpenOptions()` | build / open the settings panel |
 
 ## Events and hooks
 
 Event frame:
 
-- `PLAYER_LOGIN` — print loaded message.
+- `PLAYER_LOGIN` — init `PartyMembersMarkerDB`, `pcall(SetupOptions)`, print
+  loaded message.
 - `NAME_PLATE_UNIT_ADDED` — `UpdateNameplate(unit)`.
 - `NAME_PLATE_UNIT_REMOVED` — `RestorePlate(plate)` (clean the pooled plate).
 - `PLAYER_FLAGS_CHANGED` / `GROUP_ROSTER_UPDATE` — `UpdateAllNameplates()`
@@ -172,7 +220,10 @@ Secure hooks (`hooksecurefunc`):
 
 ## Configuration (tunables at top of file)
 
-These are plain locals today; intended to be backed by saved settings later.
+Plain locals; most are intended to be backed by saved settings later.
+`ICON_SIZE` is **already** DB-backed: it is the default, and the live value
+comes from `PartyMembersMarkerDB.iconSize` via `GetIconSize()` (slider range
+`ICON_SIZE_MIN`=16 .. `ICON_SIZE_MAX`=96).
 
 | Tunable | Default | Meaning |
 |---|---|---|
@@ -186,7 +237,7 @@ These are plain locals today; intended to be backed by saved settings later.
 | `VERTICAL_OFFSET` | `-10` | name vertical nudge (+ up / − down) |
 | `SHOW_CLASS_ICON` | `true` | class icon above friendly player names |
 | `ICON_SCOPE` | `"party"` | `"all"` / `"party"` / `"raid"` — who gets the icon |
-| `ICON_SIZE` | `48` | class icon diameter, px |
+| `ICON_SIZE` | `48` | class icon diameter, px — **default** for the DB-backed `iconSize` (configurable in the settings panel) |
 | `ICON_GAP` | `8` | gap between icon bottom and name top, px |
 | `ICON_BORDER` | `4` | class-colored ring thickness, px |
 
@@ -204,14 +255,14 @@ from the DB at login, and call `UpdateAllNameplates()` after a change.
 
 ---
 
-## Debug
+## Slash commands
 
-`/pmm` (target a unit first) prints:
-
-- the unit's tooltip lines 1–6 (to inspect the occupation line format);
-- the native name font (file/size/flags);
-- any UnitFrame fields whose name contains `raid`/`target` (to confirm region
-  names per client).
+- **`/pmm config`** — opens the settings panel (`OpenOptions`).
+- **`/pmm`** (target a unit first) — debug dump:
+  - the unit's tooltip lines 1–6 (to inspect the occupation line format);
+  - the native name font (file/size/flags);
+  - any UnitFrame fields whose name contains `raid`/`target` (to confirm region
+    names per client).
 
 ---
 
@@ -224,6 +275,8 @@ true vanilla-era clients:
 - `C_NamePlate.*`, `NAME_PLATE_UNIT_ADDED/REMOVED`
 - `SetIgnoreParentAlpha`, `CreateMaskTexture` / `AddMaskTexture`
 - `UnitPVPName`, `CLASS_ICON_TCOORDS`
+- `Settings.*` canvas API (panel registration / `OpenToCategory`) and the
+  `OptionsSliderTemplate` slider template
 - `CompactUnitFrame_UpdateName` hook target; per-build the raid-marker field is
   `uf.RaidTargetFrame` (verify with `/pmm` on each client).
 
