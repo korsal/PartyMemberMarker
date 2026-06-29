@@ -28,6 +28,14 @@ local ICON_GAP        = 8          -- gap between icon bottom and name top, px
 local ICON_BORDER     = 4          -- class-colored rim thickness around the icon, px
 -- ---------------------------------------------------------------------------
 
+-- Configurable (via the settings panel) icon size, persisted in SavedVariables.
+local ICON_SIZE_MIN = 16
+local ICON_SIZE_MAX = 96
+
+local function GetIconSize()
+    return (PartyMembersMarkerDB and PartyMembersMarkerDB.iconSize) or ICON_SIZE
+end
+
 -- Blizzard nameplate regions we suppress for friendly units. The native name
 -- is hidden via the UpdateName hook below (we draw our own instead).
 local BAR_REGIONS = { "healthBar", "castBar", "LevelFrame", "ClassificationFrame",
@@ -183,17 +191,19 @@ local function GetText(plate)
     local sub = MakeLabel(holder, fontFile, math.max(fontHeight + SUB_SIZE_DELTA, 1))
     sub.main:SetPoint("TOP", name.main, "BOTTOM", 0, -1)
 
+    local iconSize = GetIconSize()
+
     -- Class-colored ring behind the icon: a solid white square (tints
     -- correctly), masked into a smooth circle, larger than the icon so its
     -- rim shows as a colored border.
     local border = holder:CreateTexture(nil, "ARTWORK", nil, -1)
     border:SetTexture("Interface\\Buttons\\WHITE8X8")
-    border:SetSize(ICON_SIZE + ICON_BORDER * 2, ICON_SIZE + ICON_BORDER * 2)
+    border:SetSize(iconSize + ICON_BORDER * 2, iconSize + ICON_BORDER * 2)
     border:Hide()
 
     -- Class icon, sits above the name (used for friendly players only).
     local icon = holder:CreateTexture(nil, "ARTWORK")
-    icon:SetSize(ICON_SIZE, ICON_SIZE)
+    icon:SetSize(iconSize, iconSize)
     icon:SetTexture("Interface\\TargetingFrame\\UI-Classes-Circles")
     icon:SetPoint("BOTTOM", name.main, "TOP", 0, ICON_GAP)
     icon:Hide()
@@ -327,6 +337,132 @@ local function UpdateAllNameplates()
     end
 end
 
+-- Resize the class icon + ring on all existing plates (called after the
+-- settings slider changes). Masks track their textures via SetAllPoints.
+local function RefreshIconSizes()
+    local size = GetIconSize()
+    for _, t in pairs(PMM.text) do
+        if t.icon then t.icon:SetSize(size, size) end
+        if t.border then t.border:SetSize(size + ICON_BORDER * 2, size + ICON_BORDER * 2) end
+    end
+end
+
+------------------------------------------------------------
+-- Options panel (ESC -> Options -> AddOns), built once at login.
+------------------------------------------------------------
+local optionsCategory
+
+local function SetupOptions()
+    if optionsCategory then return end
+    if not (Settings and Settings.RegisterCanvasLayoutCategory) then return end
+
+    -- Small left/right arrow stepper button next to a slider.
+    local function MakeStepper(parent, isLeft, onClick)
+        local b = CreateFrame("Button", nil, parent)
+        b:SetSize(18, 18)
+        local base = isLeft and "PrevPage" or "NextPage"
+        b:SetNormalTexture("Interface\\Buttons\\UI-SpellbookIcon-" .. base .. "-Up")
+        b:SetPushedTexture("Interface\\Buttons\\UI-SpellbookIcon-" .. base .. "-Down")
+        b:SetDisabledTexture("Interface\\Buttons\\UI-SpellbookIcon-" .. base .. "-Disabled")
+        b:SetHighlightTexture("Interface\\Buttons\\UI-Common-MouseHilight", "ADD")
+        b:SetScript("OnClick", onClick)
+        return b
+    end
+
+    local panel = CreateFrame("Frame")
+    panel.name = "PartyMembersMarker"
+
+    local title = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
+    title:SetPoint("TOPLEFT", 16, -16)
+    title:SetText("PartyMembersMarker")
+
+    -- Live preview badge (uses the player's own class). Positioned to the
+    -- right of the slider below (anchored after the slider is created).
+    local previewLabel = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    previewLabel:SetText("Preview")
+
+    local preview = CreateFrame("Frame", nil, panel)
+    preview:SetSize(ICON_SIZE_MAX + ICON_BORDER * 2, ICON_SIZE_MAX + ICON_BORDER * 2)
+
+    local pBorder = preview:CreateTexture(nil, "ARTWORK", nil, -1)
+    pBorder:SetTexture("Interface\\Buttons\\WHITE8X8")
+    pBorder:SetPoint("CENTER")
+
+    local pIcon = preview:CreateTexture(nil, "ARTWORK")
+    pIcon:SetTexture("Interface\\TargetingFrame\\UI-Classes-Circles")
+    pIcon:SetPoint("CENTER")
+
+    if preview.CreateMaskTexture then
+        local mi = preview:CreateMaskTexture()
+        mi:SetTexture("Interface\\Masks\\CircleMaskScalable", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+        mi:SetAllPoints(pIcon)
+        pIcon:AddMaskTexture(mi)
+
+        local mb = preview:CreateMaskTexture()
+        mb:SetTexture("Interface\\Masks\\CircleMaskScalable", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+        mb:SetAllPoints(pBorder)
+        pBorder:AddMaskTexture(mb)
+    end
+
+    local function UpdatePreview(size)
+        local _, class = UnitClass("player")
+        local coords = class and CLASS_ICON_TCOORDS and CLASS_ICON_TCOORDS[class]
+        if coords then pIcon:SetTexCoord(coords[1], coords[2], coords[3], coords[4]) end
+        local c = class and (CUSTOM_CLASS_COLORS or RAID_CLASS_COLORS)[class]
+        if c then pBorder:SetVertexColor(c.r, c.g, c.b) end
+        pIcon:SetSize(size, size)
+        pBorder:SetSize(size + ICON_BORDER * 2, size + ICON_BORDER * 2)
+    end
+
+    -- Icon size slider with +/- arrow steppers.
+    local slider = CreateFrame("Slider", "PMMIconSizeSlider", panel, "OptionsSliderTemplate")
+    slider:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 24, -48)
+    slider:SetWidth(220)
+    slider:SetMinMaxValues(ICON_SIZE_MIN, ICON_SIZE_MAX)
+    slider:SetValueStep(1)
+    slider:SetObeyStepOnDrag(true)
+    PMMIconSizeSliderLow:SetText(tostring(ICON_SIZE_MIN))
+    PMMIconSizeSliderHigh:SetText(tostring(ICON_SIZE_MAX))
+
+    slider:SetScript("OnValueChanged", function(_, value)
+        value = math.floor(value + 0.5)
+        PMMIconSizeSliderText:SetText("Icon size: " .. value)
+        UpdatePreview(value)
+        if PartyMembersMarkerDB then
+            PartyMembersMarkerDB.iconSize = value
+            RefreshIconSizes()
+        end
+    end)
+    MakeStepper(slider, true, function()
+        slider:SetValue(math.max(ICON_SIZE_MIN, math.min(ICON_SIZE_MAX, GetIconSize() - 1)))
+    end):SetPoint("RIGHT", slider, "LEFT", -4, 0)
+    MakeStepper(slider, false, function()
+        slider:SetValue(math.max(ICON_SIZE_MIN, math.min(ICON_SIZE_MAX, GetIconSize() + 1)))
+    end):SetPoint("LEFT", slider, "RIGHT", 4, 0)
+
+    -- Place the preview to the right of the slider (clearing the stepper).
+    preview:SetPoint("LEFT", slider, "RIGHT", 60, 0)
+    previewLabel:SetPoint("BOTTOM", preview, "TOP", 0, 8)
+
+    panel:SetScript("OnShow", function()
+        local size = GetIconSize()
+        slider:SetValue(size)
+        PMMIconSizeSliderText:SetText("Icon size: " .. size)
+        UpdatePreview(size)
+    end)
+
+    optionsCategory = Settings.RegisterCanvasLayoutCategory(panel, panel.name)
+    Settings.RegisterAddOnCategory(optionsCategory)
+end
+
+local function OpenOptions()
+    if optionsCategory and Settings and Settings.OpenToCategory then
+        Settings.OpenToCategory(optionsCategory:GetID())
+    else
+        print("|cff00ff00PartyMembersMarker|r: options panel unavailable.")
+    end
+end
+
 local frame = CreateFrame("Frame")
 frame:RegisterEvent("PLAYER_LOGIN")
 frame:RegisterEvent("NAME_PLATE_UNIT_ADDED")
@@ -336,6 +472,11 @@ frame:RegisterEvent("GROUP_ROSTER_UPDATE")
 
 frame:SetScript("OnEvent", function(self, event, unit)
     if event == "PLAYER_LOGIN" then
+        PartyMembersMarkerDB = PartyMembersMarkerDB or {}
+        if type(PartyMembersMarkerDB.iconSize) ~= "number" then
+            PartyMembersMarkerDB.iconSize = ICON_SIZE
+        end
+        pcall(SetupOptions)
         print("|cff00ff00PartyMembersMarker|r: loaded")
 
     elseif event == "NAME_PLATE_UNIT_ADDED" then
@@ -366,9 +507,13 @@ if CompactUnitFrame_UpdateName then
 end
 
 
--- Debug: /pmm dumps the tooltip lines of your current target.
+-- /pmm config opens the options panel; /pmm dumps the current target's tooltip.
 SLASH_PMM1 = "/pmm"
-SlashCmdList["PMM"] = function()
+SlashCmdList["PMM"] = function(msg)
+    if msg and msg:lower():match("^%s*config") then
+        OpenOptions()
+        return
+    end
     local unit = "target"
     if not UnitExists(unit) then
         print("|cff00ff00PMM|r: no target")
@@ -397,3 +542,4 @@ SlashCmdList["PMM"] = function()
         end
     end
 end
+
