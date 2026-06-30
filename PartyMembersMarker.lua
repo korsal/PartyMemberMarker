@@ -1,6 +1,7 @@
 local PMM = {}
 PMM.hidden = {}      -- [plate] = true   (we hid its bar regions)
 PMM.text   = {}      -- [plate] = { name = FontString, sub = FontString }
+PMM.factionStanding = {}  -- [factionName] = standingID (1-8), for NPC rep coloring
 
 -- ---- Tunables --------------------------------------------------------------
 -- Font file. nil = clone the native nameplate name font (FRIZQT__ on most
@@ -147,6 +148,47 @@ local function GetDisplayName(unitToken)
     return name
 end
 
+-- Cache "faction name -> your standing (1-8)" so we can color an NPC by your
+-- reputation with its faction (UnitReaction is "friendly" for most city NPCs
+-- regardless of rep).
+local buildingFactions = false
+local function BuildFactionStanding()
+    if buildingFactions then return end
+    buildingFactions = true
+    -- Expand collapsed headers so child factions are enumerable.
+    local i = 1
+    while i <= GetNumFactions() do
+        local _, _, _, _, _, _, _, _, isHeader, isCollapsed = GetFactionInfo(i)
+        if isHeader and isCollapsed then
+            ExpandFactionHeader(i)
+        else
+            i = i + 1
+        end
+    end
+    wipe(PMM.factionStanding)
+    for j = 1, GetNumFactions() do
+        local name, _, standingID, _, _, _, _, _, isHeader = GetFactionInfo(j)
+        if name and standingID and not isHeader then
+            PMM.factionStanding[name] = standingID
+        end
+    end
+    buildingFactions = false
+end
+
+-- Your standing with an NPC's faction, read from its tooltip faction line.
+local function GetNPCFactionStanding(unitToken)
+    scanTip:ClearLines()
+    scanTip:SetUnit(unitToken)
+    for i = 2, 6 do
+        local line = _G["PMMScanTooltipTextLeft" .. i]
+        local text = line and line:GetText()
+        if text and PMM.factionStanding[text] then
+            return PMM.factionStanding[text]
+        end
+    end
+    return nil
+end
+
 local function GetNameColor(unitToken)
     if UnitIsPlayer(unitToken) then
         local _, class = UnitClass(unitToken)
@@ -154,11 +196,17 @@ local function GetNameColor(unitToken)
         if c then return c.r, c.g, c.b end
         return 1, 1, 1              -- fallback: white
     end
-    local reaction = UnitReaction("player", unitToken)
-    if reaction and reaction == 4 then
-        return 1, 1, 0              -- neutral: yellow
+    -- NPC: color by your reputation standing with its faction when known,
+    -- else fall back to its reaction. 1-3 hostile, 4 neutral, 5+ friendly.
+    local rank = GetNPCFactionStanding(unitToken) or UnitReaction("player", unitToken)
+    if rank then
+        if rank <= 3 then
+            return 1, 0.1, 0.1      -- hostile / low rep: red
+        elseif rank == 4 then
+            return 1, 1, 0          -- neutral: yellow
+        end
     end
-    return 0, 1, 0                  -- friendly NPC: green
+    return 0, 1, 0                  -- friendly: green
 end
 
 -- A "label" is the main FontString plus, when OUTLINE_COLOR is set, a ring of
@@ -679,6 +727,7 @@ frame:RegisterEvent("NAME_PLATE_UNIT_REMOVED")
 frame:RegisterEvent("PLAYER_FLAGS_CHANGED")
 frame:RegisterEvent("GROUP_ROSTER_UPDATE")
 frame:RegisterEvent("UNIT_NAME_UPDATE")
+frame:RegisterEvent("UPDATE_FACTION")
 
 frame:SetScript("OnEvent", function(self, event, unit)
     if event == "PLAYER_LOGIN" then
@@ -701,6 +750,7 @@ frame:SetScript("OnEvent", function(self, event, unit)
         if type(PartyMembersMarkerDB.fontKey) ~= "string" then
             PartyMembersMarkerDB.fontKey = "DEFAULT"
         end
+        BuildFactionStanding()
         pcall(SetupOptions)
         print("|cff00ff00PartyMembersMarker|r: loaded")
 
@@ -721,6 +771,11 @@ frame:SetScript("OnEvent", function(self, event, unit)
         -- Name/class info just arrived for a unit; refresh its plate so the
         -- class icon can appear once the class is finally known.
         if unit then pcall(UpdateNameplate, unit) end
+
+    elseif event == "UPDATE_FACTION" then
+        -- Reputation changed; rebuild the standing cache and recolor plates.
+        BuildFactionStanding()
+        UpdateAllNameplates()
     end
 end)
 
