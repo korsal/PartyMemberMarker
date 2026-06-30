@@ -230,8 +230,25 @@ repo-wide `MoP-Classic-AddOn-Porting-Notes.md` for general gotchas.
 
 ## Known issues / follow-ups
 
-- **Names show through walls.** `SetIgnoreParentAlpha` ignores the occlusion
-  fade. Tried an alpha-threshold re-hide; reverted as unreliable.
+- **Names show through walls (unresolved).** Because our text holder uses
+  `SetIgnoreParentAlpha(true)` (to avoid the non-target dimming), it also
+  ignores the engine's occlusion fade — so friendly names render through walls.
+  Two fixes were attempted and reverted:
+  1. An `OnUpdate` on NPC holders that hid them when the plate's effective alpha
+     dropped below the expected selection alpha (i.e. occlusion kicked in),
+     keeping players visible through walls. This relies on the engine actually
+     fading occluded plates.
+  2. Forcing `nameplateOccludedAlphaMult` below 1 on login so that fade exists.
+     `/pmm` revealed it defaults to **1.0** on this client (occlusion fade off),
+     so without this the detection never triggers; names persist until the
+     nameplate is removed (a large angle).
+  Both were reverted: enabling occlusion is a global CVar change that also fades
+  **enemy** plates behind walls (undesirable for PvP awareness, which is exactly
+  why a PvP user keeps `occludedMult = 1`), and the nameplate occlusion angle is
+  coarser than the native "nameplates off" name occlusion anyway. Net: friendly
+  names (players and NPCs) currently show through walls; left as-is. Note the
+  test left the CVar at `0.9` in SavedVariables — restore with
+  `/console nameplateOccludedAlphaMult 1` if needed.
 - **Spec icons (instead of class icons)** were prototyped via combat-log
   detection and reverted — unreliable until the player casts a signature spell.
 - Building the faction cache expands the reputation pane's collapsed headers (a
