@@ -5,8 +5,8 @@
 <h1 align="center">PartyMembersMarker</h1>
 
 <p align="center">
-  Turns friendly nameplates into a clean name-only look and marks your group
-  members with a class-colored icon badge.
+  Track your party and raid members at a glance with a class icon above their
+  nameplate — no screen clutter, no raid markers.
 </p>
 
 <!--
@@ -23,53 +23,58 @@
 
 ---
 
-PartyMembersMarker hides the health bars on **friendly** players and NPCs so
-their nameplates collapse to a clean floating name (like the native
-"nameplates off" look), while leaving **enemy** nameplates untouched. It adds
-the player's guild or the NPC's occupation under the name, colors player names
-by class, and puts a circular class-icon badge above your group members.
+PartyMembersMarker makes it easy to keep track of where your party members are
+— especially in **arena and battlegrounds**. Each ally is marked with their
+**class icon** above their nameplate, so you can spot your teammates at a glance
+— without cluttering the screen with full friendly nameplates, and without
+asking everyone to set raid markers.
 
-Built for **Mists of Pandaria Classic (5.5.4, interface `50504`)**.
+It also keeps things tidy: **friendly** nameplates are stripped down to a clean,
+name-only look (like the native "nameplates off" view), while **enemy**
+nameplates are left completely untouched.
+
+Built for **Mists of Pandaria Classic (5.5.4)**.
 
 ## Features
 
-- **Name-only friendly plates** — health/cast/level bars hidden on friendly
-  players and NPCs; only the name remains.
-- **Second line** — `<Guild>` for players, `<Occupation>` for NPCs
-  (Innkeeper, Vendor, …).
-- **Class-colored names** with AFK/DND status prefix; friendly NPCs in green.
-- **Class-icon badge** above friendly players — a circular class icon with a
-  class-colored ring, shown for **all / party / raid** members (your choice).
-- **Native raid marker hidden** on friendly plates for a cleaner look.
-- **In-game options** — icon size (with live preview) and icon scope.
-
-## Installation
-
-- **Manual:** download the latest release and extract the `PartyMembersMarker`
-  folder into `World of Warcraft/_classic_/Interface/AddOns/`.
-- **CurseForge:** _(coming soon)_ install via the CurseForge page or your addon
-  manager.
+- **Class-icon marker** — a circular class icon with a class-colored ring above
+  your group members, so you always know where each teammate is. Show it for
+  **all players**, **party members**, or **raid members** (your choice).
+- **No raid markers needed** — find your allies instantly without relying on
+  skull/cross raid icons.
+- **Name-only friendly plates** — health, cast and level bars hidden on friendly
+  players and NPCs, leaving just a clean floating name.
+- **Second line under the name** — a player's `<Guild>`, or an NPC's occupation
+  (`<Innkeeper>`, `<Vendor>`, …).
+- **Smart name colors** — players tinted by class; friendly NPCs colored by your
+  reputation with their faction (green / yellow / red). AFK/DND status prefix
+  included.
+- **Cleaner look** — the native raid target marker is hidden on friendly plates.
+- **In-game options** — class-icon size (with a live preview), icon scope, font,
+  and separate name size + outline for players and NPCs.
 
 ## How to use
 
-1. Install and log in. Friendly nameplates become name-only automatically.
-2. Make sure nameplates are on (key **V**, or `/console nameplateShowAll 1`),
-   with friendly nameplates enabled.
-3. Open the options panel: **ESC → Options → AddOns → PartyMembersMarker**, or
-   type `/pmm config`.
+1. Install and log in.
+2. **Enable friendly nameplates** — press **Ctrl+V** (or
+   `/console nameplateShowFriends 1`). The addon only works while friendly
+   nameplates are shown.
+3. Your party/raid members are now marked with their class icon. Open the
+   options to customize: **ESC → Options → AddOns → PartyMembersMarker**, or type
+   `/pmm config`.
 
-## Options panel
+## Options
 
 - **Icon size** — class-icon diameter, with a live class-badge preview.
-- **Show class icon for** — All players / Party members / Raid members
-  (changing this prompts a quick UI reload to apply cleanly).
+- **Show class icon for** — All players / Party members / Raid members.
+- **Name text** — font, plus separate name size and outline for players and NPCs.
 
 ## Slash commands
 
 | Command | Description |
 |---|---|
 | `/pmm config` | Open the options panel. |
-| `/pmm` | Debug: dump the current target's tooltip lines, native name font, and raid/target-related nameplate fields. |
+| `/pmm` | Debug: dump the current target's tooltip lines and nameplate info. |
 
 ## Documentation
 
