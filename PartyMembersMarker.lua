@@ -6,14 +6,14 @@ PMM.text   = {}      -- [plate] = { name = FontString, sub = FontString }
 -- Font file. nil = clone the native nameplate name font (FRIZQT__ on most
 -- clients). Set a path to override, e.g. "Fonts\\MORPHEUS.TTF". Any custom
 -- font must contain Cyrillic glyphs.
-local FONT_FILE       = nil        -- nil = native plate font (Friz Quadrata, FRIZQT__)
-local NAME_SIZE       = nil        -- nil = use the native size; or a number, e.g. 14
+local FONT_FILE       = STANDARD_TEXT_FONT  -- nil = native plate font; here the locale default UI font
+local NAME_SIZE       = 10         -- nil = use the native size; or a number, e.g. 14
 local NAME_OUTLINE    = "OUTLINE"  -- "" / "OUTLINE" / "THICKOUTLINE" (bold effect)
 -- Faux colored outline: WoW's OUTLINE flag is always black, so to get a
 -- colored edge we draw copies of the text behind it in this color.
 -- nil = use the plain (black) NAME_OUTLINE flag instead.
 local OUTLINE_COLOR   = nil        -- e.g. {0,1,0} green, or nil
-local OUTLINE_WIDTH   = 1          -- faux-outline offset, px
+local OUTLINE_WIDTH   = 1          -- faux-outline offset, pxNAME_OUTLINE
 local SHADOW          = true       -- engine-style drop shadow (matches default names)
 local SUB_SIZE_DELTA  = -2         -- sub line is this much smaller than name
 local VERTICAL_OFFSET = -10        -- nudge name up (+) / down (-), in px
@@ -38,6 +38,44 @@ end
 
 local function GetIconScope()
     return (PartyMembersMarkerDB and PartyMembersMarkerDB.iconScope) or ICON_SCOPE
+end
+
+-- Name text styling (configurable via the settings panel).
+local NAME_SIZE_MIN = 8
+local NAME_SIZE_MAX = 24
+
+local FONTS = {
+    { key = "DEFAULT",  label = "Default (Friz Quadrata)", path = STANDARD_TEXT_FONT or "Fonts\\FRIZQT__.TTF" },
+    { key = "ARIALN",   label = "Arial Narrow",            path = "Fonts\\ARIALN.TTF" },
+    { key = "MORPHEUS", label = "Morpheus",                path = "Fonts\\MORPHEUS.TTF" },
+    { key = "SKURRI",   label = "Skurri",                  path = "Fonts\\SKURRI.TTF" },
+}
+local FONT_BY_KEY, FONT_LABEL_BY_KEY = {}, {}
+for _, f in ipairs(FONTS) do FONT_BY_KEY[f.key] = f.path; FONT_LABEL_BY_KEY[f.key] = f.label end
+
+local function GetFontKey()
+    return (PartyMembersMarkerDB and PartyMembersMarkerDB.fontKey) or "DEFAULT"
+end
+local function GetFontFile()
+    return FONT_BY_KEY[GetFontKey()] or FONT_FILE
+end
+local function GetPlayerNameSize()
+    return (PartyMembersMarkerDB and PartyMembersMarkerDB.nameSizePlayer) or NAME_SIZE or 12
+end
+local function GetNPCNameSize()
+    return (PartyMembersMarkerDB and PartyMembersMarkerDB.nameSizeNPC) or NAME_SIZE or 12
+end
+local function GetNameSizeFor(unitToken)
+    if UnitIsPlayer(unitToken) then return GetPlayerNameSize() else return GetNPCNameSize() end
+end
+local function GetOutline()
+    local on
+    if PartyMembersMarkerDB and PartyMembersMarkerDB.nameOutline ~= nil then
+        on = PartyMembersMarkerDB.nameOutline
+    else
+        on = (NAME_OUTLINE ~= "")
+    end
+    return on and "OUTLINE" or ""
 end
 
 -- Blizzard nameplate regions we suppress for friendly units. The native name
@@ -128,7 +166,7 @@ end
 local OUTLINE_DIRS = { {1,0}, {-1,0}, {0,1}, {0,-1}, {1,1}, {1,-1}, {-1,1}, {-1,-1} }
 
 local function MakeLabel(parent, fontFile, size)
-    local flag = OUTLINE_COLOR and "" or NAME_OUTLINE
+    local flag = OUTLINE_COLOR and "" or GetOutline()
     local label = { copies = {} }
 
     local main = parent:CreateFontString(nil, "OVERLAY")
@@ -170,6 +208,16 @@ local function LabelHide(label)
     for _, c in ipairs(label.copies) do c:Hide() end
 end
 
+-- Apply font/size/outline to a plate's name + sub labels (and outline copies).
+local function ApplyLabelFonts(t, file, nameSize, flag)
+    if not file then return end
+    local subSize = math.max(nameSize + SUB_SIZE_DELTA, 1)
+    t.name.main:SetFont(file, nameSize, flag)
+    for _, c in ipairs(t.name.copies) do c:SetFont(file, nameSize, flag) end
+    t.sub.main:SetFont(file, subSize, flag)
+    for _, c in ipairs(t.sub.copies) do c:SetFont(file, subSize, flag) end
+end
+
 -- Lazily build our name + sub labels, mirroring the native name's font.
 local function GetText(plate)
     if PMM.text[plate] then return PMM.text[plate] end
@@ -178,8 +226,8 @@ local function GetText(plate)
     if not uf then return nil end
 
     local nativeFile, nativeHeight = uf.name and uf.name:GetFont()
-    local fontFile   = FONT_FILE or nativeFile
-    local fontHeight = NAME_SIZE or nativeHeight or 12
+    local fontFile   = GetFontFile() or nativeFile
+    local fontHeight = GetPlayerNameSize() or nativeHeight or 12  -- per-unit size set in ApplyFriendly
 
     -- Per-plate holder parented to the nameplate itself: this keeps our text
     -- on the nameplate layer (so it interleaves correctly with other plates
@@ -276,6 +324,9 @@ local function ApplyFriendly(plate, unitToken)
     local t = GetText(plate)
     if not t then return end
 
+    -- Apply the per-unit-type font size (player vs NPC).
+    ApplyLabelFonts(t, GetFontFile(), GetNameSizeFor(unitToken), GetOutline())
+
     local r, g, b = GetNameColor(unitToken)
     LabelSetText(t.name, GetDisplayName(unitToken))
     LabelSetColor(t.name, r, g, b)
@@ -351,6 +402,20 @@ local function RefreshIconSizes()
     for _, t in pairs(PMM.text) do
         if t.icon then t.icon:SetSize(size, size) end
         if t.border then t.border:SetSize(size + ICON_BORDER * 2, size + ICON_BORDER * 2) end
+    end
+end
+
+-- Re-apply font/size/outline to all existing labels (after a text setting
+-- changes), picking the player or NPC size per plate's current unit.
+local function RefreshFonts()
+    local file = GetFontFile()
+    if not file then return end
+    local flag = GetOutline()
+    for plate, t in pairs(PMM.text) do
+        local unit = (plate.UnitFrame and plate.UnitFrame.unit) or plate.namePlateUnitToken
+        if unit then
+            ApplyLabelFonts(t, file, GetNameSizeFor(unit), flag)
+        end
     end
 end
 
@@ -506,12 +571,93 @@ local function SetupOptions()
         prev = b
     end
 
+    -- ===== Name text styling =====
+    local textHeader = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    textHeader:SetPoint("TOPLEFT", scopeButtons[#scopeButtons], "BOTTOMLEFT", 0, -22)
+    textHeader:SetText("Name text")
+
+    -- Font dropdown
+    local fontLabel = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+    fontLabel:SetPoint("TOPLEFT", textHeader, "BOTTOMLEFT", 0, -8)
+    fontLabel:SetText("Font")
+    local fontDrop = CreateFrame("Frame", "PMMFontDropdown", panel, "UIDropDownMenuTemplate")
+    fontDrop:SetPoint("TOPLEFT", fontLabel, "BOTTOMLEFT", -16, -2)
+    UIDropDownMenu_SetWidth(fontDrop, 150)
+    UIDropDownMenu_Initialize(fontDrop, function(_, level)
+        for _, f in ipairs(FONTS) do
+            local info = UIDropDownMenu_CreateInfo()
+            info.text = f.label
+            info.checked = (GetFontKey() == f.key)
+            info.func = function()
+                if PartyMembersMarkerDB then PartyMembersMarkerDB.fontKey = f.key end
+                UIDropDownMenu_SetText(fontDrop, f.label)
+                RefreshFonts()
+            end
+            UIDropDownMenu_AddButton(info, level)
+        end
+    end)
+
+    -- Separate name-size sliders for players and NPCs.
+    local function MakeSizeSlider(globalName, anchor, xoff, yoff, labelText, getter, dbKey)
+        local s = CreateFrame("Slider", globalName, panel, "OptionsSliderTemplate")
+        s:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", xoff, yoff)
+        s:SetWidth(220)
+        s:SetMinMaxValues(NAME_SIZE_MIN, NAME_SIZE_MAX)
+        s:SetValueStep(1)
+        s:SetObeyStepOnDrag(true)
+        _G[globalName .. "Low"]:SetText(tostring(NAME_SIZE_MIN))
+        _G[globalName .. "High"]:SetText(tostring(NAME_SIZE_MAX))
+        local txt = _G[globalName .. "Text"]
+        s.pmmLabel, s.pmmGetter = labelText, getter
+        s:SetScript("OnValueChanged", function(_, v)
+            v = math.floor(v + 0.5)
+            txt:SetText(labelText .. ": " .. v)
+            if PartyMembersMarkerDB then PartyMembersMarkerDB[dbKey] = v end
+            RefreshFonts()
+        end)
+        MakeStepper(s, true, function()
+            s:SetValue(math.max(NAME_SIZE_MIN, math.min(NAME_SIZE_MAX, getter() - 1)))
+        end):SetPoint("RIGHT", s, "LEFT", -4, 0)
+        MakeStepper(s, false, function()
+            s:SetValue(math.max(NAME_SIZE_MIN, math.min(NAME_SIZE_MAX, getter() + 1)))
+        end):SetPoint("LEFT", s, "RIGHT", 4, 0)
+        return s
+    end
+
+    local playerSlider = MakeSizeSlider("PMMPlayerSizeSlider", fontDrop, 20, -26,
+        "Player name size", GetPlayerNameSize, "nameSizePlayer")
+    local npcSlider = MakeSizeSlider("PMMNPCSizeSlider", playerSlider, 0, -34,
+        "NPC name size", GetNPCNameSize, "nameSizeNPC")
+
+    -- Outline checkbox
+    local outlineCheck = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
+    outlineCheck:SetPoint("TOPLEFT", npcSlider, "BOTTOMLEFT", -20, -18)
+    local outlineText = outlineCheck:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    outlineText:SetPoint("LEFT", outlineCheck, "RIGHT", 4, 0)
+    outlineText:SetText("Outline")
+    outlineCheck:SetScript("OnClick", function(self)
+        if PartyMembersMarkerDB then
+            PartyMembersMarkerDB.nameOutline = self:GetChecked() and true or false
+        end
+        RefreshFonts()
+    end)
+
+    local sizeSliders = { playerSlider, npcSlider }
+
     panel:SetScript("OnShow", function()
         local size = GetIconSize()
         slider:SetValue(size)
         PMMIconSizeSliderText:SetText("Icon size: " .. size)
         UpdatePreview(size)
         SyncScopeButtons()
+
+        UIDropDownMenu_SetText(fontDrop, FONT_LABEL_BY_KEY[GetFontKey()] or "Default")
+        for _, s in ipairs(sizeSliders) do
+            local v = s.pmmGetter()
+            s:SetValue(v)
+            _G[s:GetName() .. "Text"]:SetText(s.pmmLabel .. ": " .. v)
+        end
+        outlineCheck:SetChecked(GetOutline() ~= "")
     end)
 
     optionsCategory = Settings.RegisterCanvasLayoutCategory(panel, panel.name)
@@ -542,6 +688,18 @@ frame:SetScript("OnEvent", function(self, event, unit)
         end
         if type(PartyMembersMarkerDB.iconScope) ~= "string" then
             PartyMembersMarkerDB.iconScope = ICON_SCOPE
+        end
+        if type(PartyMembersMarkerDB.nameSizePlayer) ~= "number" then
+            PartyMembersMarkerDB.nameSizePlayer = PartyMembersMarkerDB.nameSize or NAME_SIZE
+        end
+        if type(PartyMembersMarkerDB.nameSizeNPC) ~= "number" then
+            PartyMembersMarkerDB.nameSizeNPC = PartyMembersMarkerDB.nameSize or NAME_SIZE
+        end
+        if type(PartyMembersMarkerDB.nameOutline) ~= "boolean" then
+            PartyMembersMarkerDB.nameOutline = (NAME_OUTLINE ~= "")
+        end
+        if type(PartyMembersMarkerDB.fontKey) ~= "string" then
+            PartyMembersMarkerDB.fontKey = "DEFAULT"
         end
         pcall(SetupOptions)
         print("|cff00ff00PartyMembersMarker|r: loaded")
