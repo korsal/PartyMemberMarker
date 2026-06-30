@@ -69,13 +69,20 @@ end
 local function GetNameSizeFor(unitToken)
     if UnitIsPlayer(unitToken) then return GetPlayerNameSize() else return GetNPCNameSize() end
 end
-local function GetOutline()
-    local on
-    if PartyMembersMarkerDB and PartyMembersMarkerDB.nameOutline ~= nil then
-        on = PartyMembersMarkerDB.nameOutline
-    else
-        on = (NAME_OUTLINE ~= "")
+local function GetPlayerOutline()
+    if PartyMembersMarkerDB and PartyMembersMarkerDB.nameOutlinePlayer ~= nil then
+        return PartyMembersMarkerDB.nameOutlinePlayer
     end
+    return NAME_OUTLINE ~= ""
+end
+local function GetNPCOutline()
+    if PartyMembersMarkerDB and PartyMembersMarkerDB.nameOutlineNPC ~= nil then
+        return PartyMembersMarkerDB.nameOutlineNPC
+    end
+    return NAME_OUTLINE ~= ""
+end
+local function GetOutlineFor(unitToken)
+    local on = UnitIsPlayer(unitToken) and GetPlayerOutline() or GetNPCOutline()
     return on and "OUTLINE" or ""
 end
 
@@ -214,7 +221,7 @@ end
 local OUTLINE_DIRS = { {1,0}, {-1,0}, {0,1}, {0,-1}, {1,1}, {1,-1}, {-1,1}, {-1,-1} }
 
 local function MakeLabel(parent, fontFile, size)
-    local flag = OUTLINE_COLOR and "" or GetOutline()
+    local flag = OUTLINE_COLOR and "" or (GetPlayerOutline() and "OUTLINE" or "")
     local label = { copies = {} }
 
     local main = parent:CreateFontString(nil, "OVERLAY")
@@ -372,8 +379,8 @@ local function ApplyFriendly(plate, unitToken)
     local t = GetText(plate)
     if not t then return end
 
-    -- Apply the per-unit-type font size (player vs NPC).
-    ApplyLabelFonts(t, GetFontFile(), GetNameSizeFor(unitToken), GetOutline())
+    -- Apply the per-unit-type font size + outline (player vs NPC).
+    ApplyLabelFonts(t, GetFontFile(), GetNameSizeFor(unitToken), GetOutlineFor(unitToken))
 
     local r, g, b = GetNameColor(unitToken)
     LabelSetText(t.name, GetDisplayName(unitToken))
@@ -458,11 +465,10 @@ end
 local function RefreshFonts()
     local file = GetFontFile()
     if not file then return end
-    local flag = GetOutline()
     for plate, t in pairs(PMM.text) do
         local unit = (plate.UnitFrame and plate.UnitFrame.unit) or plate.namePlateUnitToken
         if unit then
-            ApplyLabelFonts(t, file, GetNameSizeFor(unit), flag)
+            ApplyLabelFonts(t, file, GetNameSizeFor(unit), GetOutlineFor(unit))
         end
     end
 end
@@ -677,20 +683,28 @@ local function SetupOptions()
     local npcSlider = MakeSizeSlider("PMMNPCSizeSlider", playerSlider, 0, -34,
         "NPC name size", GetNPCNameSize, "nameSizeNPC")
 
-    -- Outline checkbox
-    local outlineCheck = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
-    outlineCheck:SetPoint("TOPLEFT", npcSlider, "BOTTOMLEFT", -20, -18)
-    local outlineText = outlineCheck:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    outlineText:SetPoint("LEFT", outlineCheck, "RIGHT", 4, 0)
-    outlineText:SetText("Outline")
-    outlineCheck:SetScript("OnClick", function(self)
-        if PartyMembersMarkerDB then
-            PartyMembersMarkerDB.nameOutline = self:GetChecked() and true or false
-        end
-        RefreshFonts()
-    end)
+    -- An "Outline" checkbox to the right of each size slider (per unit type).
+    local function MakeOutlineCheck(anchorSlider, getter, dbKey)
+        local cb = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
+        cb:SetPoint("LEFT", anchorSlider, "RIGHT", 44, 0)
+        local txt = cb:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+        txt:SetPoint("LEFT", cb, "RIGHT", 2, 0)
+        txt:SetText("Outline")
+        cb.pmmGetter = getter
+        cb:SetScript("OnClick", function(self)
+            if PartyMembersMarkerDB then
+                PartyMembersMarkerDB[dbKey] = self:GetChecked() and true or false
+            end
+            RefreshFonts()
+        end)
+        return cb
+    end
+
+    local playerOutline = MakeOutlineCheck(playerSlider, GetPlayerOutline, "nameOutlinePlayer")
+    local npcOutline    = MakeOutlineCheck(npcSlider, GetNPCOutline, "nameOutlineNPC")
 
     local sizeSliders = { playerSlider, npcSlider }
+    local outlineChecks = { playerOutline, npcOutline }
 
     panel:SetScript("OnShow", function()
         local size = GetIconSize()
@@ -705,7 +719,9 @@ local function SetupOptions()
             s:SetValue(v)
             _G[s:GetName() .. "Text"]:SetText(s.pmmLabel .. ": " .. v)
         end
-        outlineCheck:SetChecked(GetOutline() ~= "")
+        for _, cb in ipairs(outlineChecks) do
+            cb:SetChecked(cb.pmmGetter())
+        end
     end)
 
     optionsCategory = Settings.RegisterCanvasLayoutCategory(panel, panel.name)
@@ -744,8 +760,15 @@ frame:SetScript("OnEvent", function(self, event, unit)
         if type(PartyMembersMarkerDB.nameSizeNPC) ~= "number" then
             PartyMembersMarkerDB.nameSizeNPC = PartyMembersMarkerDB.nameSize or NAME_SIZE
         end
-        if type(PartyMembersMarkerDB.nameOutline) ~= "boolean" then
-            PartyMembersMarkerDB.nameOutline = (NAME_OUTLINE ~= "")
+        if type(PartyMembersMarkerDB.nameOutlinePlayer) ~= "boolean" then
+            local d = PartyMembersMarkerDB.nameOutline
+            if d == nil then d = (NAME_OUTLINE ~= "") end
+            PartyMembersMarkerDB.nameOutlinePlayer = d
+        end
+        if type(PartyMembersMarkerDB.nameOutlineNPC) ~= "boolean" then
+            local d = PartyMembersMarkerDB.nameOutline
+            if d == nil then d = (NAME_OUTLINE ~= "") end
+            PartyMembersMarkerDB.nameOutlineNPC = d
         end
         if type(PartyMembersMarkerDB.fontKey) ~= "string" then
             PartyMembersMarkerDB.fontKey = "DEFAULT"
