@@ -249,8 +249,28 @@ repo-wide `MoP-Classic-AddOn-Porting-Notes.md` for general gotchas.
   names (players and NPCs) currently show through walls; left as-is. Note the
   test left the CVar at `0.9` in SavedVariables — restore with
   `/console nameplateOccludedAlphaMult 1` if needed.
-- **Spec icons (instead of class icons)** were prototyped via combat-log
-  detection and reverted — unreliable until the player casts a signature spell.
+- **Spec icon instead of class icon (prototyped, reverted).** Goal: show a
+  teammate's specialization icon, useful in arena/BG for reading roles
+  (healer/tank/dps). Another player's spec can't be read synchronously, so two
+  sources were considered:
+  - **Inspect** (`NotifyInspect` → `INSPECT_READY` → `GetInspectSpecialization`
+    → `GetSpecializationInfoByID`) — async, one unit at a time, range-limited,
+    unreliable in combat; only practical during an arena/BG prep phase.
+  - **Passive combat-log detection** — the approach we prototyped, borrowed from
+    the `BattlegroundTargets` addon: a static `SPEC_BY_SPELL` map of signature
+    spell IDs → specID. On `COMBAT_LOG_EVENT_UNFILTERED` (`SPELL_CAST_SUCCESS` /
+    `SPELL_AURA_APPLIED` from a player), cache `specByGUID[guid] = specID`; when
+    drawing a friendly player, use the spec icon (`GetSpecializationInfoByID`
+    icon, circle-masked) if known, else fall back to the class icon. Refresh the
+    plate on first detection; wired to a **"Detect specialization"** checkbox
+    (`detectSpec`), refreshed on `UNIT_NAME_UPDATE`/`RAID_TARGET_UPDATE`, cache
+    cleared on `PLAYER_ENTERING_WORLD`.
+  - **Why reverted:** detection only lands once the player casts a *signature*
+    spell (works on a busy BG, but laggy/unreliable elsewhere and never for
+    someone who hasn't cast); the spell→spec table is large and patch-specific
+    (and copying it from another addon is a licensing question). The class icon
+    is always known instantly, so it stays the default. Could return as a hybrid
+    (class icon + inspect during prep + optional combat-log upgrade).
 - Building the faction cache expands the reputation pane's collapsed headers (a
   minor visible side effect).
 - `KNameplateColor` coexists: its friendly-plate work lands on regions we hide;
