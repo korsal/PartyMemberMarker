@@ -376,6 +376,16 @@ local function ApplyFriendly(plate, unitToken)
         end)
     end
 
+    -- The level text is likewise re-shown by Blizzard on updates; keep it
+    -- hidden for friendly units via a per-plate Show hook.
+    local lvl = uf and uf.LevelFrame
+    if lvl and lvl.Show and not lvl.pmmHooked then
+        lvl.pmmHooked = true
+        hooksecurefunc(lvl, "Show", function(self)
+            if uf.unit and IsFriendlyUnit(uf.unit) then self:Hide() end
+        end)
+    end
+
     local t = GetText(plate)
     if not t then return end
 
@@ -844,7 +854,7 @@ SlashCmdList["PMM"] = function(msg)
     end
     if uf then
         for k, v in pairs(uf) do
-            if type(k) == "string" and (k:lower():find("raid") or k:lower():find("target")) then
+            if type(k) == "string" and (k:lower():find("raid") or k:lower():find("target") or k:lower():find("level")) then
                 print("|cff00ff00PMM|r uf field:", k, type(v))
             end
         end

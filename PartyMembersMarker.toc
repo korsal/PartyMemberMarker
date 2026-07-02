@@ -2,7 +2,7 @@
 ## Title: PartyMembersMarker
 ## Notes: Clean friendly nameplates (name-only) with guild/occupation and a class-icon badge for group members
 ## Author: reisal
-## Version: 1.1.0
+## Version: 1.1.1
 ## SavedVariables: PartyMembersMarkerDB
 
 PartyMembersMarker.lua

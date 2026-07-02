@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.1.1
+- Fixed the unit level number occasionally appearing next to friendly names.
+
 ## v1.1.0
 - NPC names are now colored by your reputation with their faction (green / yellow / red), instead of always green.
 - Added font selection (Friz Quadrata / Arial Narrow / Morpheus / Skurri).
