@@ -443,6 +443,7 @@ end
 local function UpdateNameplate(unitToken)
     local plate = C_NamePlate.GetNamePlateForUnit(unitToken)
     if not plate then return end
+    if plate.UnitFrame and plate.UnitFrame:IsForbidden() then return end  -- skip forbidden plates
 
     if IsFriendlyUnit(unitToken) then
         ApplyFriendly(plate, unitToken)
@@ -816,7 +817,10 @@ end)
 -- hidden for the friendly units we manage so our own text never doubles.
 if CompactUnitFrame_UpdateName then
     hooksecurefunc("CompactUnitFrame_UpdateName", function(uf)
-        local unit = uf and uf.unit
+        -- Skip forbidden plates: the client protects friendly nameplates in
+        -- some instances (anti-automation), and addons can't touch them.
+        if not uf or uf:IsForbidden() then return end
+        local unit = uf.unit
         if not unit or not unit:match("^nameplate") then return end
         if uf.name and IsFriendlyUnit(unit) then
             uf.name:Hide()

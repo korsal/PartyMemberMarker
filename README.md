@@ -69,6 +69,13 @@ Built for **Mists of Pandaria Classic (5.5.4)**.
 - **Show class icon for** — All players / Party members / Raid members.
 - **Name text** — font, plus separate name size and outline for players and NPCs.
 
+## Note
+
+In some **instances** (e.g. random dungeons) the game protects friendly
+nameplates so addons cannot modify them. There, party markers won't appear —
+this is a client restriction, not a bug. It works in the open world and in
+arenas/battlegrounds where friendly nameplates aren't protected.
+
 ## Slash commands
 
 | Command | Description |

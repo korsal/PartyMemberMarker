@@ -271,6 +271,14 @@ repo-wide `MoP-Classic-AddOn-Porting-Notes.md` for general gotchas.
     (and copying it from another addon is a licensing question). The class icon
     is always known instantly, so it stays the default. Could return as a hybrid
     (class icon + inspect during prep + optional combat-log upgrade).
+- **Forbidden plates in instances (client limitation).** In some instances
+  (e.g. random dungeons) the client creates friendly nameplates as **forbidden**
+  (`uf:IsForbidden()`) to stop addons from turning them into unit frames
+  (anti-automation). Addons can't touch those — `NAME_PLATE_UNIT_ADDED` doesn't
+  fire and `GetNamePlateForUnit` returns nil for them, and the global
+  `CompactUnitFrame_UpdateName` hook must early-out on `IsForbidden()` or it
+  errors with *"calling 'Hide' on bad self"*. Net: party markers don't appear in
+  those instances; nothing an addon can do. Works in the open world and PvP.
 - Building the faction cache expands the reputation pane's collapsed headers (a
   minor visible side effect).
 - `KNameplateColor` coexists: its friendly-plate work lands on regions we hide;

@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.1.2
+- Fixed a Lua error ("calling 'Hide' on bad self") caused by protected (forbidden) nameplates in some instances.
+- Note: in instances where the client protects friendly nameplates (e.g. random dungeons), party markers can't be shown — a client restriction, not a bug.
+
 ## v1.1.1
 - Fixed the unit level number occasionally appearing next to friendly names.
 
