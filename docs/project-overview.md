@@ -136,25 +136,55 @@ used because tinting the class-circles atlas directly produced a black ring.)
 Event frame:
 
 - `PLAYER_LOGIN` — init `PartyMembersMarkerDB`, `BuildFactionStanding`,
-  `pcall(SetupOptions)`.
+  `pcall(SetupOptions)`. On the **first run** (DB was `nil`) it also enables the
+  friendly-nameplate CVars (`FRIENDLY_NP_CVARS` → `"1"`) so the addon works out
+  of the box; only on first run, so a later choice to hide them isn't overridden.
 - `NAME_PLATE_UNIT_ADDED` → `UpdateNameplate`; `NAME_PLATE_UNIT_REMOVED` →
   `RestorePlate`.
 - `PLAYER_FLAGS_CHANGED` / `GROUP_ROSTER_UPDATE` → `UpdateAllNameplates`
   (AFK/DND prefix, party/raid icon scope).
 - `UNIT_NAME_UPDATE` → refresh that unit (class icon appears once class loads).
 - `UPDATE_FACTION` → rebuild standing cache + recolor plates.
+- `UNIT_FACTION` → a unit's attackability/reaction changed (duel start/end, PvP
+  flagging); re-classifies visible plates through the safe `ReclassifyPlate`
+  (immediate reaction). It's a nudge — the reliable driver is the reconcile
+  ticker below, since `UNIT_FACTION` can fire before `UnitCanAttack` settles.
 
 `UpdateAllNameplates` wraps each plate in `pcall` so one bad plate can't abort
 the refresh.
+
+### Duel / attackability transitions
+
+A duel (or PvP flag) flips a unit's attackability **without** recreating the
+nameplate, so `NAME_PLATE_UNIT_ADDED` never fires and the plate would keep the
+wrong skin. `ReclassifyPlate(plate, unit)` flips a single plate between our
+friendly skin and a normal plate, and only acts on the actual transition:
+
+- un-skin (`RestorePlate`) is gated on the **positive** `UnitCanAttack` signal,
+  not "not friendly" — the check can run before a plate's unit data is loaded
+  (both `UnitCanAttack` and `UnitIsFriend` read false), and treating that
+  transient as hostile would permanently un-skin a genuinely friendly plate;
+- re-skin (`ApplyFriendly`) only when the unit reads friendly again.
+
+It's driven by a light **`C_Timer.NewTicker(0.3, …)`** reconcile over the
+visible plates (plus the `UNIT_FACTION` nudge). The timer is the robust
+catch-all: event timing for the flip is unreliable here, but the ticker always
+converges within ~0.3s. Steady state is just a couple of cheap checks per plate.
 
 Secure hooks:
 
 - **`CompactUnitFrame_UpdateName`** — re-hide `uf.name` for friendly nameplate
   units (Blizzard re-shows it on every update, incl. mouseover) so our text
   never doubles.
-- **`RaidTargetFrame:Show`** (per plate, once) — re-hide the native raid marker
-  for friendly units (re-shown by `uf:UpdateRaidTarget`). Field confirmed as
-  `uf.RaidTargetFrame` via `/pmm`.
+- **`healthBar` / `castBar` / `LevelFrame` / `RaidTargetFrame` `Show`** (per
+  plate, once) — Blizzard re-shows every region it owns on updates, so a
+  one-time hide leaks back (a health bar over a friendly plate). Each is
+  re-hidden for friendly units on its `Show`. Enemies/duel opponents keep them.
+- **Raid marker special case.** `RaidTargetFrame` is **not** in the bulk
+  `BAR_REGIONS` force-show: showing it without an assigned marker reveals its
+  untextured icon atlas (all 8 markers, tiny) on a duel opponent. It's hidden
+  explicitly on friendly plates + via the `Show` hook, and `RestorePlate` lets
+  Blizzard (`uf:UpdateRaidTarget`) set the real marker for enemies.
 
 ---
 
@@ -171,6 +201,13 @@ PartyMembersMarkerDB = {
     nameSizeNPC      = 10,        -- NPC name font size
     nameOutlinePlayer = true,     -- outline on player names
     nameOutlineNPC    = true,     -- outline on NPC names
+    hideFriendlyInInstance = true,  -- turn friendly nameplates off in PvE instances (default on)
+    -- runtime bookkeeping for the above (persist across /reload):
+    hidFriendly      = false,     -- we currently have friendly plates turned off
+    savedShowFriends = {          -- per-CVar values to restore on exit (a table:
+        nameplateShowFriendlyPlayers = "1", -- MoP 5.5.4 has no combined
+        nameplateShowFriendlyNPCs    = "1", -- `nameplateShowFriends`, so we
+    },                            -- save/restore the two split CVars)
 }
 ```
 
@@ -199,6 +236,46 @@ Built once in `SetupOptions()` under `pcall`, registered via the modern
 - **Name text** section: **Font** dropdown (`UIDropDownMenu`); **Player name
   size** and **NPC name size** sliders, each with an **Outline** checkbox to its
   right (per unit type).
+- **Auto-disable friendly nameplates when the client blocks marking them with the
+  class icon** checkbox (`hideFriendlyInInstance`, on by default).
+
+### Auto-disable friendly nameplates in instances
+
+Since friendly nameplates are **forbidden** in PvE instances (see Known issues),
+the addon can't clean them up there — they just clutter. Opt-in feature
+(`hideFriendlyInInstance`) to turn them off in that case.
+
+**Which CVars.** MoP Classic 5.5.4 has **no** combined `nameplateShowFriends`
+(`GetCVar` returns `nil` — confirmed via the `/pmm config` probe). Friendly
+visibility is split into `nameplateShowFriendlyPlayers` and
+`nameplateShowFriendlyNPCs`, so the addon drives **both** (see the module-level
+`FRIENDLY_NP_CVARS` list). This was the root cause of the feature never working:
+the earlier code wrote to the non-existent `nameplateShowFriends`.
+
+**Single source of truth: `ApplyInstanceNameplateState()`.** One reconcile
+function decides the whole state — hide when the option is on **and**
+`IsInInstance()` reports a `party`/`raid` instance; restore otherwise. On the
+first hide it saves each CVar's current value into `savedShowFriends` (a per-CVar
+table) and sets `hidFriendly`, then sets every `FRIENDLY_NP_CVARS` entry to
+`"0"`; `RestoreFriendlyNameplates()` puts each saved value back and clears
+`hidFriendly`. Both flags live in the DB so a `/reload` inside the instance can't
+lose or overwrite the saved values. Making one function own both directions is
+what fixed the second bug where hide-on-enter and restore-on-exit lived on two
+separate code paths that could disagree.
+
+It's driven from three places:
+
+- **`PLAYER_ENTERING_WORLD` (primary).** Runs the reconcile immediately **and**
+  again after `C_Timer.After(1.5, …)`, because `IsInInstance()` can lag right at
+  the event (both on enter and on exit). The immediate pass handles the common
+  case; the delayed pass corrects a stale `IsInInstance()`.
+- **Forbidden-plate hook (backup trigger).** The global
+  `CompactUnitFrame_UpdateName` hook fires for forbidden plates; when it sees one
+  and we haven't hidden yet (`option on and not hidFriendly`), it kicks the
+  reconcile once. Guarded so it never re-runs `SetCVar` on every `UpdateName`.
+- **Options checkbox.** Toggling the setting calls the reconcile directly, so it
+  hides immediately if you're already in an instance, or restores if you just
+  turned it off.
 
 ---
 
@@ -279,6 +356,8 @@ repo-wide `MoP-Classic-AddOn-Porting-Notes.md` for general gotchas.
   `CompactUnitFrame_UpdateName` hook must early-out on `IsForbidden()` or it
   errors with *"calling 'Hide' on bad self"*. Net: party markers don't appear in
   those instances; nothing an addon can do. Works in the open world and PvP.
+  Mitigation: the opt-in **auto-disable friendly nameplates in instances** feature
+  (above) removes the resulting clutter.
 - Building the faction cache expands the reputation pane's collapsed headers (a
   minor visible side effect).
 - `KNameplateColor` coexists: its friendly-plate work lands on regions we hide;

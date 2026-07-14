@@ -41,6 +41,10 @@ local function GetIconScope()
     return (PartyMembersMarkerDB and PartyMembersMarkerDB.iconScope) or ICON_SCOPE
 end
 
+local function GetHideFriendlyInInstance()
+    return PartyMembersMarkerDB and PartyMembersMarkerDB.hideFriendlyInInstance
+end
+
 -- Name text styling (configurable via the settings panel).
 local NAME_SIZE_MIN = 8
 local NAME_SIZE_MAX = 24
@@ -88,8 +92,11 @@ end
 
 -- Blizzard nameplate regions we suppress for friendly units. The native name
 -- is hidden via the UpdateName hook below (we draw our own instead).
-local BAR_REGIONS = { "healthBar", "castBar", "LevelFrame", "ClassificationFrame",
-                      "RaidTargetFrame" }
+-- Regions we force show/hide in bulk. NOTE: RaidTargetFrame is deliberately NOT
+-- here -- it must only ever be visible when the unit actually has a marker, so
+-- force-showing it (on restore) reveals its untextured atlas (all 8 markers,
+-- tiny). It's hidden for friendly plates explicitly + via a Show hook instead.
+local BAR_REGIONS = { "healthBar", "castBar", "LevelFrame", "ClassificationFrame" }
 
 local function SetRegionsShown(plate, shown)
     local uf = plate.UnitFrame
@@ -369,11 +376,14 @@ local function ApplyFriendly(plate, unitToken)
     -- when the marker changes; hook its Show once per plate to keep it hidden
     -- for friendly units.
     local rt = uf and uf.RaidTargetFrame
-    if rt and not rt.pmmHooked then
-        rt.pmmHooked = true
-        hooksecurefunc(rt, "Show", function(self)
-            if uf.unit and IsFriendlyUnit(uf.unit) then self:Hide() end
-        end)
+    if rt then
+        rt:Hide()   -- keep the native raid marker off friendly plates
+        if not rt.pmmHooked then
+            rt.pmmHooked = true
+            hooksecurefunc(rt, "Show", function(self)
+                if uf.unit and IsFriendlyUnit(uf.unit) then self:Hide() end
+            end)
+        end
     end
 
     -- The level text is likewise re-shown by Blizzard on updates; keep it
@@ -382,6 +392,25 @@ local function ApplyFriendly(plate, unitToken)
     if lvl and lvl.Show and not lvl.pmmHooked then
         lvl.pmmHooked = true
         hooksecurefunc(lvl, "Show", function(self)
+            if uf.unit and IsFriendlyUnit(uf.unit) then self:Hide() end
+        end)
+    end
+
+    -- Same story for the health and cast bars: Blizzard re-shows them on
+    -- health/cast updates, so a one-time SetRegionsShown(false) leaks back
+    -- (visible health bar over a friendly plate). Keep them hidden for friendly
+    -- units with the same per-plate Show hook; enemies/duel opponents keep them.
+    local hb = uf and uf.healthBar
+    if hb and hb.Show and not hb.pmmHooked then
+        hb.pmmHooked = true
+        hooksecurefunc(hb, "Show", function(self)
+            if uf.unit and IsFriendlyUnit(uf.unit) then self:Hide() end
+        end)
+    end
+    local cb = uf and uf.castBar
+    if cb and cb.Show and not cb.pmmHooked then
+        cb.pmmHooked = true
+        hooksecurefunc(cb, "Show", function(self)
             if uf.unit and IsFriendlyUnit(uf.unit) then self:Hide() end
         end)
     end
@@ -431,6 +460,12 @@ local function RestorePlate(plate)
     local uf = plate.UnitFrame
     if uf and uf.name then uf.name:Show() end
 
+    -- SetRegionsShown(true) force-shows the raid-target frame too, but it must
+    -- only be visible when the unit actually has a marker assigned -- otherwise
+    -- the untextured frame shows the whole raid-icon atlas (all 8 markers,
+    -- tiny). Let Blizzard reset its visibility from the unit's real marker.
+    if uf and uf.UpdateRaidTarget then pcall(uf.UpdateRaidTarget, uf) end
+
     local t = PMM.text[plate]
     if t then
         LabelHide(t.name)
@@ -458,6 +493,81 @@ local function UpdateAllNameplates()
         -- pcall so one bad plate can't abort the whole refresh (which left
         -- some plates stale when switching the icon scope).
         if unit then pcall(UpdateNameplate, unit) end
+    end
+end
+
+-- Cheap re-classify for a single plate whose friend/enemy state can change
+-- WITHOUT a NAME_PLATE_UNIT_ADDED (a duel starting/ending, PvP flagging): flip
+-- it between our friendly skin and a normal plate. Only touches a plate on the
+-- actual transition, so it's a no-op every other call and safe to run from the
+-- frequently-fired health-color hook below.
+--
+-- The un-skin is gated on the POSITIVE UnitCanAttack signal (not merely "not
+-- friendly"): the hook can fire before a plate's unit data is loaded, when
+-- UnitCanAttack/UnitIsFriend both read false, and treating that transient as
+-- "hostile" would permanently un-skin a genuinely friendly plate (no further
+-- health-color update fires for an idle player to correct it).
+local function ReclassifyPlate(plate, unitToken)
+    if not plate or not unitToken or not UnitExists(unitToken) then return end
+    if PMM.hidden[plate] then
+        -- We have it skinned as friendly; only un-skin once it's actually
+        -- attackable (a duel started).
+        if UnitCanAttack("player", unitToken) then
+            RestorePlate(plate)
+        end
+    elseif IsFriendlyUnit(unitToken) then
+        -- Not skinned but now friendly (a duel ended) -> re-apply our skin.
+        ApplyFriendly(plate, unitToken)
+    end
+end
+
+-- In PvE instances the client protects (forbids) friendly nameplates, so the
+-- addon can't skin them; optionally just turn friendly nameplates off there and
+-- restore the previous setting on leaving. (Arena/BG plates aren't protected.)
+
+-- CVars controlling friendly-nameplate visibility on this client. MoP Classic
+-- 5.5.4 has NO combined `nameplateShowFriends` (returns nil) -- it splits into
+-- separate players/NPCs CVars, so we drive both. (Confirmed via the /pmm probe.)
+local FRIENDLY_NP_CVARS = { "nameplateShowFriendlyPlayers", "nameplateShowFriendlyNPCs" }
+
+-- Restore each friendly-nameplate CVar to the value saved before we hid it.
+local function RestoreFriendlyNameplates()
+    local db = PartyMembersMarkerDB
+    if not db or not db.hidFriendly then return end
+    local saved = type(db.savedShowFriends) == "table" and db.savedShowFriends or {}
+    for _, cv in ipairs(FRIENDLY_NP_CVARS) do
+        pcall(SetCVar, cv, saved[cv] or "1")
+    end
+    db.hidFriendly = false
+end
+
+-- Single source of truth: reconcile the friendly-nameplate hide state with the
+-- current zone. Hide when the option is on and we're in a party/raid instance;
+-- otherwise restore. Driven by PLAYER_ENTERING_WORLD (immediate + delayed, since
+-- IsInInstance() can lag right at the event), the options checkbox, and the
+-- forbidden-plate hook (a backup trigger). savedShowFriends (a per-CVar table)
+-- + hidFriendly live in the DB so a /reload inside the instance can't lose or
+-- overwrite them.
+local function ApplyInstanceNameplateState()
+    local db = PartyMembersMarkerDB
+    if not db then return end
+    local inInstance, instType = IsInInstance()
+    local shouldHide = GetHideFriendlyInInstance()
+        and inInstance and (instType == "party" or instType == "raid")
+    if shouldHide then
+        if not db.hidFriendly then
+            local saved = {}
+            for _, cv in ipairs(FRIENDLY_NP_CVARS) do
+                saved[cv] = GetCVar(cv) or "1"
+            end
+            db.savedShowFriends = saved
+            db.hidFriendly = true
+        end
+        for _, cv in ipairs(FRIENDLY_NP_CVARS) do
+            pcall(SetCVar, cv, "0")
+        end
+    else
+        RestoreFriendlyNameplates()
     end
 end
 
@@ -636,9 +746,25 @@ local function SetupOptions()
         prev = b
     end
 
+    -- Hide friendly nameplates inside instances (where they're protected).
+    local instCheck = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
+    instCheck:SetPoint("TOPLEFT", scopeButtons[#scopeButtons], "BOTTOMLEFT", 0, -14)
+    local instText = instCheck:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    instText:SetPoint("LEFT", instCheck, "RIGHT", 4, 0)
+    instText:SetText("Auto-disable friendly nameplates when the client blocks marking them with the class icon")
+    instCheck:SetScript("OnClick", function(self)
+        local on = self:GetChecked() and true or false
+        if PartyMembersMarkerDB then
+            PartyMembersMarkerDB.hideFriendlyInInstance = on
+        end
+        -- Apply right away: hide now if we're in an instance, or restore if the
+        -- option was just turned off.
+        ApplyInstanceNameplateState()
+    end)
+
     -- ===== Name text styling =====
     local textHeader = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-    textHeader:SetPoint("TOPLEFT", scopeButtons[#scopeButtons], "BOTTOMLEFT", 0, -22)
+    textHeader:SetPoint("TOPLEFT", instCheck, "BOTTOMLEFT", 0, -16)
     textHeader:SetText("Name text")
 
     -- Font dropdown
@@ -733,6 +859,7 @@ local function SetupOptions()
         for _, cb in ipairs(outlineChecks) do
             cb:SetChecked(cb.pmmGetter())
         end
+        instCheck:SetChecked(GetHideFriendlyInInstance())
     end)
 
     optionsCategory = Settings.RegisterCanvasLayoutCategory(panel, panel.name)
@@ -755,9 +882,12 @@ frame:RegisterEvent("PLAYER_FLAGS_CHANGED")
 frame:RegisterEvent("GROUP_ROSTER_UPDATE")
 frame:RegisterEvent("UNIT_NAME_UPDATE")
 frame:RegisterEvent("UPDATE_FACTION")
+frame:RegisterEvent("UNIT_FACTION")
+frame:RegisterEvent("PLAYER_ENTERING_WORLD")
 
 frame:SetScript("OnEvent", function(self, event, unit)
     if event == "PLAYER_LOGIN" then
+        local firstRun = (PartyMembersMarkerDB == nil)
         PartyMembersMarkerDB = PartyMembersMarkerDB or {}
         if type(PartyMembersMarkerDB.iconSize) ~= "number" then
             PartyMembersMarkerDB.iconSize = ICON_SIZE
@@ -783,6 +913,17 @@ frame:SetScript("OnEvent", function(self, event, unit)
         end
         if type(PartyMembersMarkerDB.fontKey) ~= "string" then
             PartyMembersMarkerDB.fontKey = "DEFAULT"
+        end
+        if type(PartyMembersMarkerDB.hideFriendlyInInstance) ~= "boolean" then
+            PartyMembersMarkerDB.hideFriendlyInInstance = true  -- on by default
+        end
+        -- First install: enable friendly nameplates so the addon works out of
+        -- the box (it only marks/skins plates that are actually shown). Only on
+        -- the very first run, so we never override a later choice to hide them.
+        if firstRun then
+            for _, cv in ipairs(FRIENDLY_NP_CVARS) do
+                pcall(SetCVar, cv, "1")
+            end
         end
         BuildFactionStanding()
         pcall(SetupOptions)
@@ -810,6 +951,26 @@ frame:SetScript("OnEvent", function(self, event, unit)
         -- Reputation changed; rebuild the standing cache and recolor plates.
         BuildFactionStanding()
         UpdateAllNameplates()
+
+    elseif event == "UNIT_FACTION" then
+        -- A unit's attackability/reaction changed (a duel starting or ending,
+        -- PvP flagging, ...). Re-classify visible plates through the SAFE
+        -- ReclassifyPlate (un-skin only on a positive UnitCanAttack), never the
+        -- un-gated UpdateNameplate -- UNIT_FACTION fires often for allies and a
+        -- transient "not friendly" read there would permanently un-skin a
+        -- friendly plate (leaking the health bar).
+        for _, plate in pairs(C_NamePlate.GetNamePlates()) do
+            local u = plate.namePlateUnitToken or (plate.UnitFrame and plate.UnitFrame.unit)
+            if u then pcall(ReclassifyPlate, plate, u) end
+        end
+
+    elseif event == "PLAYER_ENTERING_WORLD" then
+        -- Entered or left a zone: reconcile the hide state. IsInInstance() can
+        -- lag right at the event, so re-check after a short delay too.
+        ApplyInstanceNameplateState()
+        if C_Timer and C_Timer.After then
+            C_Timer.After(1.5, ApplyInstanceNameplateState)
+        end
     end
 end)
 
@@ -818,12 +979,45 @@ end)
 if CompactUnitFrame_UpdateName then
     hooksecurefunc("CompactUnitFrame_UpdateName", function(uf)
         -- Skip forbidden plates: the client protects friendly nameplates in
-        -- some instances (anti-automation), and addons can't touch them.
-        if not uf or uf:IsForbidden() then return end
+        -- some instances (anti-automation), and addons can't touch them. Their
+        -- mere presence is the trigger to hide friendly nameplates (if opted in).
+        if not uf or uf:IsForbidden() then
+            -- A forbidden friendly plate means we're in a protected PvE
+            -- instance; kick the reconcile once if we haven't hidden yet
+            -- (backup for the PLAYER_ENTERING_WORLD path). Guarded so we don't
+            -- re-run SetCVar on every UpdateName call.
+            local db = PartyMembersMarkerDB
+            if db and GetHideFriendlyInInstance() and not db.hidFriendly then
+                ApplyInstanceNameplateState()
+            end
+            return
+        end
         local unit = uf.unit
         if not unit or not unit:match("^nameplate") then return end
         if uf.name and IsFriendlyUnit(unit) then
             uf.name:Hide()
+        end
+    end)
+end
+
+-- Duels (and PvP flagging) change a unit's attackability WITHOUT recreating the
+-- nameplate, and the exact event/timing of that flip is unreliable here:
+-- UNIT_FACTION / CompactUnitFrame_UpdateHealthColor can fire before
+-- UnitCanAttack settles, so an event-driven re-check runs once on the stale
+-- state and then never again, leaving a plate stuck half-skinned (native health
+-- bar + level after a duel, or no un-skin at duel start so plate-buff addons
+-- show nothing). A light periodic reconcile is the robust catch-all: every tick
+-- re-check each visible plate and flip it if its friend/enemy state no longer
+-- matches how we skinned it. ReclassifyPlate only does work on the actual
+-- transition, so steady state is just a couple of cheap checks per plate.
+if C_Timer and C_Timer.NewTicker then
+    C_Timer.NewTicker(0.3, function()
+        for _, plate in pairs(C_NamePlate.GetNamePlates()) do
+            local uf = plate.UnitFrame
+            if not (uf and uf:IsForbidden()) then
+                local u = plate.namePlateUnitToken or (uf and uf.unit)
+                if u then pcall(ReclassifyPlate, plate, u) end
+            end
         end
     end)
 end

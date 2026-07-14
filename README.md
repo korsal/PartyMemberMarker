@@ -50,15 +50,19 @@ Built for **Mists of Pandaria Classic (5.5.4)**.
   reputation with their faction (green / yellow / red). AFK/DND status prefix
   included.
 - **Cleaner look** — the native raid target marker is hidden on friendly plates.
+- **Auto-disable friendly plates in dungeons/raids** — optional: since the game
+  protects (forbids) friendly nameplates inside PvE instances so they can't be
+  cleaned up, turn them off automatically on entering and restore your setting on
+  leaving.
 - **In-game options** — class-icon size (with a live preview), icon scope, font,
   and separate name size + outline for players and NPCs.
 
 ## How to use
 
-1. Install and log in.
-2. **Enable friendly nameplates** — press **Ctrl+V** (or
-   `/console nameplateShowFriends 1`). The addon only works while friendly
-   nameplates are shown.
+1. Install and log in — on first run the addon **enables friendly nameplates**
+   for you so it works right away (it only marks plates that are actually shown).
+2. If you ever turn them off, re-enable with **Ctrl+V** — the addon only works
+   while friendly nameplates are shown.
 3. Your party/raid members are now marked with their class icon. Open the
    options to customize: **ESC → Options → AddOns → PartyMembersMarker**, or type
    `/pmm config`.
@@ -68,13 +72,19 @@ Built for **Mists of Pandaria Classic (5.5.4)**.
 - **Icon size** — class-icon diameter, with a live class-badge preview.
 - **Show class icon for** — All players / Party members / Raid members.
 - **Name text** — font, plus separate name size and outline for players and NPCs.
+- **Auto-disable friendly nameplates when the client blocks marking them with the
+  class icon** — turn friendly nameplates off while inside PvE instances (where
+  they can't be cleaned up) and restore your previous setting on leaving. **On by
+  default.**
 
 ## Note
 
 In some **instances** (e.g. random dungeons) the game protects friendly
 nameplates so addons cannot modify them. There, party markers won't appear —
 this is a client restriction, not a bug. It works in the open world and in
-arenas/battlegrounds where friendly nameplates aren't protected.
+arenas/battlegrounds where friendly nameplates aren't protected. The
+**Auto-disable friendly nameplates when the client blocks marking them with the
+class icon** option (on by default) removes the resulting clutter.
 
 ## Slash commands
 
