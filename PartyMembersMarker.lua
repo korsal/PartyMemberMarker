@@ -1,5 +1,7 @@
 local PMM = {}
-PMM.hidden = {}      -- [plate] = true   (we hid its bar regions)
+PMM.hidden = {}      -- [plate] = UnitFrame whose bar regions we hid
+PMM.hiddenFrames = setmetatable({}, { __mode = "k" }) -- pooled UnitFrames we hid
+PMM.platesByUnit = {} -- [unitToken] = plate, kept until NAME_PLATE_UNIT_REMOVED
 PMM.text   = {}      -- [plate] = { name = FontString, sub = FontString }
 PMM.factionStanding = {}  -- [factionName] = standingID (1-8), for NPC rep coloring
 
@@ -96,10 +98,14 @@ end
 -- here -- it must only ever be visible when the unit actually has a marker, so
 -- force-showing it (on restore) reveals its untextured atlas (all 8 markers,
 -- tiny). It's hidden for friendly plates explicitly + via a Show hook instead.
-local BAR_REGIONS = { "healthBar", "castBar", "LevelFrame", "ClassificationFrame" }
+-- Anniversary 2.5.6 places the health and cast bars in separate containers.
+-- Keep the older fields for MoP Classic, which uses the same Lua file.
+local BAR_REGIONS = {
+    "HealthBarsContainer", "CastBarsContainer", "healthBar", "castBar",
+    "LevelFrame", "ClassificationFrame",
+}
 
-local function SetRegionsShown(plate, shown)
-    local uf = plate.UnitFrame
+local function SetRegionsShown(uf, shown)
     if not uf then return end
     for _, key in ipairs(BAR_REGIONS) do
         local region = uf[key]
@@ -166,22 +172,49 @@ end
 -- reputation with its faction (UnitReaction is "friendly" for most city NPCs
 -- regardless of rep).
 local buildingFactions = false
+local function GetFactionCount()
+    if C_Reputation and C_Reputation.GetNumFactions then
+        return C_Reputation.GetNumFactions()
+    end
+    return GetNumFactions()
+end
+
+local function GetFactionEntry(index)
+    if C_Reputation and C_Reputation.GetFactionDataByIndex then
+        local data = C_Reputation.GetFactionDataByIndex(index)
+        if data then
+            return data.name, data.reaction, data.isHeader, data.isCollapsed
+        end
+        return nil
+    end
+    local name, _, standing, _, _, _, _, _, isHeader, isCollapsed = GetFactionInfo(index)
+    return name, standing, isHeader, isCollapsed
+end
+
+local function ExpandFaction(index)
+    if C_Reputation and C_Reputation.ExpandFactionHeader then
+        C_Reputation.ExpandFactionHeader(index)
+    else
+        ExpandFactionHeader(index)
+    end
+end
+
 local function BuildFactionStanding()
     if buildingFactions then return end
     buildingFactions = true
     -- Expand collapsed headers so child factions are enumerable.
     local i = 1
-    while i <= GetNumFactions() do
-        local _, _, _, _, _, _, _, _, isHeader, isCollapsed = GetFactionInfo(i)
+    while i <= GetFactionCount() do
+        local _, _, isHeader, isCollapsed = GetFactionEntry(i)
         if isHeader and isCollapsed then
-            ExpandFactionHeader(i)
+            ExpandFaction(i)
         else
             i = i + 1
         end
     end
     wipe(PMM.factionStanding)
-    for j = 1, GetNumFactions() do
-        local name, _, standingID, _, _, _, _, _, isHeader = GetFactionInfo(j)
+    for j = 1, GetFactionCount() do
+        local name, standingID, isHeader = GetFactionEntry(j)
         if name and standingID and not isHeader then
             PMM.factionStanding[name] = standingID
         end
@@ -282,10 +315,17 @@ end
 
 -- Lazily build our name + sub labels, mirroring the native name's font.
 local function GetText(plate)
-    if PMM.text[plate] then return PMM.text[plate] end
-
     local uf = plate.UnitFrame
     if not uf then return nil end
+    if PMM.text[plate] then
+        local t = PMM.text[plate]
+        if t.unitFrame ~= uf then
+            t.name.main:ClearAllPoints()
+            t.name.main:SetPoint("CENTER", uf, "CENTER", 0, VERTICAL_OFFSET)
+            t.unitFrame = uf
+        end
+        return t
+    end
 
     local nativeFile, nativeHeight = uf.name and uf.name:GetFont()
     local fontFile   = GetFontFile() or nativeFile
@@ -339,7 +379,7 @@ local function GetText(plate)
         border:AddMaskTexture(borderMask)
     end
 
-    PMM.text[plate] = { name = name, sub = sub, icon = icon, border = border }
+    PMM.text[plate] = { name = name, sub = sub, icon = icon, border = border, unitFrame = uf }
     return PMM.text[plate]
 end
 
@@ -363,13 +403,27 @@ local function PlayerInIconScope(unitToken)
     end
 end
 
-local function ApplyFriendly(plate, unitToken)
-    if not PMM.hidden[plate] then
-        SetRegionsShown(plate, false)
-        PMM.hidden[plate] = true
-    end
+local function RestoreNativeFrame(uf)
+    if not uf or not PMM.hiddenFrames[uf] then return end
+    -- Clear this before Show(): the Show hooks must allow pooled frames to
+    -- return to their native state, even if the old unit token is still set.
+    PMM.hiddenFrames[uf] = nil
+    SetRegionsShown(uf, true)
+    if uf.name then uf.name:Show() end
+    if uf.unit and uf.UpdateRaidTarget then pcall(uf.UpdateRaidTarget, uf) end
+end
 
+local function ApplyFriendly(plate, unitToken)
     local uf = plate.UnitFrame
+    if not uf then return end
+    if PMM.hidden[plate] and PMM.hidden[plate] ~= uf then
+        RestoreNativeFrame(PMM.hidden[plate])
+    end
+    if PMM.hidden[plate] ~= uf then
+        SetRegionsShown(uf, false)
+        PMM.hidden[plate] = uf
+        PMM.hiddenFrames[uf] = true
+    end
     if uf and uf.name then uf.name:Hide() end
 
     -- The native raid marker (RaidTargetFrame) is re-shown by uf:UpdateRaidTarget
@@ -381,38 +435,20 @@ local function ApplyFriendly(plate, unitToken)
         if not rt.pmmHooked then
             rt.pmmHooked = true
             hooksecurefunc(rt, "Show", function(self)
-                if uf.unit and IsFriendlyUnit(uf.unit) then self:Hide() end
+                if PMM.hiddenFrames[uf] and uf.unit and IsFriendlyUnit(uf.unit) then self:Hide() end
             end)
         end
     end
 
-    -- The level text is likewise re-shown by Blizzard on updates; keep it
-    -- hidden for friendly units via a per-plate Show hook.
-    local lvl = uf and uf.LevelFrame
-    if lvl and lvl.Show and not lvl.pmmHooked then
-        lvl.pmmHooked = true
-        hooksecurefunc(lvl, "Show", function(self)
-            if uf.unit and IsFriendlyUnit(uf.unit) then self:Hide() end
-        end)
-    end
-
-    -- Same story for the health and cast bars: Blizzard re-shows them on
-    -- health/cast updates, so a one-time SetRegionsShown(false) leaks back
-    -- (visible health bar over a friendly plate). Keep them hidden for friendly
-    -- units with the same per-plate Show hook; enemies/duel opponents keep them.
-    local hb = uf and uf.healthBar
-    if hb and hb.Show and not hb.pmmHooked then
-        hb.pmmHooked = true
-        hooksecurefunc(hb, "Show", function(self)
-            if uf.unit and IsFriendlyUnit(uf.unit) then self:Hide() end
-        end)
-    end
-    local cb = uf and uf.castBar
-    if cb and cb.Show and not cb.pmmHooked then
-        cb.pmmHooked = true
-        hooksecurefunc(cb, "Show", function(self)
-            if uf.unit and IsFriendlyUnit(uf.unit) then self:Hide() end
-        end)
+    -- Blizzard can re-show these on health, cast, and nameplate updates.
+    for _, key in ipairs(BAR_REGIONS) do
+        local region = uf and uf[key]
+        if region and region.Show and not region.pmmHooked then
+            region.pmmHooked = true
+            hooksecurefunc(region, "Show", function(self)
+                if PMM.hiddenFrames[uf] and uf.unit and IsFriendlyUnit(uf.unit) then self:Hide() end
+            end)
+        end
     end
 
     local t = GetText(plate)
@@ -453,17 +489,15 @@ local function ApplyFriendly(plate, unitToken)
 end
 
 local function RestorePlate(plate)
-    if PMM.hidden[plate] then
-        SetRegionsShown(plate, true)
-        PMM.hidden[plate] = nil
-    end
+    local hiddenFrame = PMM.hidden[plate]
+    PMM.hidden[plate] = nil
+    RestoreNativeFrame(hiddenFrame)
+
     local uf = plate.UnitFrame
+    if uf ~= hiddenFrame then RestoreNativeFrame(uf) end
     if uf and uf.name then uf.name:Show() end
 
-    -- SetRegionsShown(true) force-shows the raid-target frame too, but it must
-    -- only be visible when the unit actually has a marker assigned -- otherwise
-    -- the untextured frame shows the whole raid-icon atlas (all 8 markers,
-    -- tiny). Let Blizzard reset its visibility from the unit's real marker.
+    -- Let Blizzard restore the raid target's actual visibility for this unit.
     if uf and uf.UpdateRaidTarget then pcall(uf.UpdateRaidTarget, uf) end
 
     local t = PMM.text[plate]
@@ -509,7 +543,7 @@ end
 -- health-color update fires for an idle player to correct it).
 local function ReclassifyPlate(plate, unitToken)
     if not plate or not unitToken or not UnitExists(unitToken) then return end
-    if PMM.hidden[plate] then
+    if PMM.hidden[plate] or PMM.hiddenFrames[plate.UnitFrame] then
         -- We have it skinned as friendly; only un-skin once it's actually
         -- attackable (a duel started).
         if UnitCanAttack("player", unitToken) then
@@ -525,10 +559,11 @@ end
 -- addon can't skin them; optionally just turn friendly nameplates off there and
 -- restore the previous setting on leaving. (Arena/BG plates aren't protected.)
 
--- CVars controlling friendly-nameplate visibility on this client. MoP Classic
--- 5.5.4 has NO combined `nameplateShowFriends` (returns nil) -- it splits into
--- separate players/NPCs CVars, so we drive both. (Confirmed via the /pmm probe.)
-local FRIENDLY_NP_CVARS = { "nameplateShowFriendlyPlayers", "nameplateShowFriendlyNPCs" }
+-- Anniversary has a combined friendly CVar plus an NPC-specific one;
+-- MoP Classic 5.5.4 uses separate player and NPC CVars.
+local FRIENDLY_NP_CVARS = GetCVar("nameplateShowFriends") ~= nil
+    and { "nameplateShowFriends", "nameplateShowFriendlyNpcs" }
+    or { "nameplateShowFriendlyPlayers", "nameplateShowFriendlyNPCs" }
 
 -- Restore each friendly-nameplate CVar to the value saved before we hid it.
 local function RestoreFriendlyNameplates()
@@ -930,10 +965,12 @@ frame:SetScript("OnEvent", function(self, event, unit)
         print("|cff00ff00PartyMembersMarker|r: loaded")
 
     elseif event == "NAME_PLATE_UNIT_ADDED" then
+        PMM.platesByUnit[unit] = C_NamePlate.GetNamePlateForUnit(unit)
         UpdateNameplate(unit)
 
     elseif event == "NAME_PLATE_UNIT_REMOVED" then
-        local plate = C_NamePlate.GetNamePlateForUnit(unit)
+        local plate = PMM.platesByUnit[unit] or C_NamePlate.GetNamePlateForUnit(unit)
+        PMM.platesByUnit[unit] = nil
         if plate then
             RestorePlate(plate)
         end
@@ -1058,4 +1095,3 @@ SlashCmdList["PMM"] = function(msg)
         end
     end
 end
-

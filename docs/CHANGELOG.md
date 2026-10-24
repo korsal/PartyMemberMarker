@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.3.0
+- Added support for Burning Crusade Classic Anniversary 2.5.6 while retaining Mists of Pandaria Classic 5.5.4 support in the same release.
+- Updated friendly nameplate handling for Anniversary's health/cast containers and reputation API.
+- Fixed missing NPC health bars after Blizzard reused a nameplate unit frame.
+- Added an Anniversary TOC and repeatable installation/release packaging scripts.
+
 ## v1.2.0
 - Fixed friendly plates not flipping to a normal enemy plate when a duel starts (leftover guild line + level over the enemy plate, and missing debuffs from plate-buff addons). A duel changes a unit's attackability without recreating the nameplate, so the addon now reconciles each visible plate on a light timer (plus `UNIT_FACTION`) and flips it to a normal enemy plate for the duel and back to the friendly skin when it ends.
 - Fixed the health/cast bars leaking back onto friendly plates: Blizzard re-shows them on updates, so they are now kept hidden with a persistent Show hook (like the level text and raid marker).

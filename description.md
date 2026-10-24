@@ -4,7 +4,8 @@ It also keeps things tidy: **friendly** nameplates are stripped down to a clean,
 
 ![Party Members Marker preview](https://media.forgecdn.net/attachments/1763/242/image33-png.png)
 
-Built for **Mists of Pandaria Classic (5.5.4)**.
+Tested in **Mists of Pandaria Classic (5.5.4)** and **Burning Crusade Classic
+Anniversary (2.5.6)**. One release supports both versions.
 
 ## Features
 

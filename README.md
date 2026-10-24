@@ -33,7 +33,20 @@ It also keeps things tidy: **friendly** nameplates are stripped down to a clean,
 name-only look (like the native "nameplates off" view), while **enemy**
 nameplates are left completely untouched.
 
-Built for **Mists of Pandaria Classic (5.5.4)**.
+Tested in **Mists of Pandaria Classic (5.5.4)** and **Burning Crusade Classic
+Anniversary (2.5.6)**. The same release archive supports both clients.
+
+## Anniversary installation
+
+Run `./deploy-anniversary.sh` from this Git checkout to copy the Lua file and
+`PartyMembersMarker_TBC.toc` into the adjacent
+`_anniversary_/Interface/AddOns/PartyMembersMarker` directory. The script can
+be run again after CurseForge updates the game copy. The checkout and its Git
+history stay outside `AddOns`; the game copy contains only runtime files.
+
+Run `./package-release.sh` to build a CurseForge-ready ZIP containing one
+`PartyMembersMarker` folder with the shared Lua file and both TOCs. Upload that
+one ZIP and select both supported game versions on the CurseForge file page.
 
 ## Features
 

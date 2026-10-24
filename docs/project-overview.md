@@ -16,13 +16,15 @@ Files:
 ```
 PartyMembersMarker/
 ├── PartyMembersMarker.toc   # Interface 50504, SavedVariables: PartyMembersMarkerDB
+├── PartyMembersMarker_TBC.toc # Interface 20506, same Lua entry point
 ├── PartyMembersMarker.lua   # entire addon (single file)
 ├── README.md                # CurseForge/GitHub readme
 ├── icon.png                 # project avatar (export-ignored from the release zip)
 └── docs/project-overview.md # this document
 ```
 
-Target client: **MoP Classic 5.5.4** (interface `50504`), modern engine.
+Target clients: **MoP Classic 5.5.4** (interface `50504`) and **Burning
+Crusade Classic Anniversary 2.5.6** (interface `20506`).
 Saved variables: `PartyMembersMarkerDB`. Slash: `/pmm` (debug) / `/pmm config`.
 
 ---
@@ -38,7 +40,8 @@ reused for an enemy).
 **Friendly units (players and NPCs):**
 
 1. Native bar regions hidden: `healthBar`, `castBar`, `LevelFrame`,
-   `ClassificationFrame`, `RaidTargetFrame`.
+   `ClassificationFrame`, `RaidTargetFrame`, plus Anniversary's
+   `HealthBarsContainer` and `CastBarsContainer`.
 2. Native **name** hidden; the addon draws its own name (controls
    font/size/outline/position/color and adds a status prefix).
 3. Name text = `UnitPVPName` (player title included) + `<Away>`/`<Busy>` AFK/DND
@@ -61,7 +64,11 @@ refresh helpers → settings panel → events → secure hooks → slash command
 
 ### State tables (`PMM`)
 
-- `PMM.hidden[plate] = true` — bar regions hidden for this plate.
+- `PMM.hidden[plate] = UnitFrame` — native bar regions hidden for this plate.
+- `PMM.hiddenFrames[UnitFrame] = true` — tracks pooled native frames until their
+  regions are restored, including after the plate releases its unit.
+- `PMM.platesByUnit[unitToken] = plate` — lets the removal event restore a frame
+  even when `C_NamePlate.GetNamePlateForUnit` no longer returns it.
 - `PMM.text[plate] = { name, sub, icon, border }` — our widgets (cached, built
   lazily, reused as plates recycle).
 - `PMM.factionStanding[name] = standingID` — your standing per faction, for NPC
