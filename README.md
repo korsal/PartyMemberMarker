@@ -9,17 +9,13 @@
   nameplate — no screen clutter, no raid markers.
 </p>
 
-<!--
-  Badge block — enable once the CurseForge project exists (replace PROJECT_ID):
-
-  <p align="center">
-    <a href="https://www.curseforge.com/wow/addons/PROJECT_SLUG">
-      <img src="https://img.shields.io/curseforge/dt/PROJECT_ID?logo=curseforge&label=CurseForge"></a>
-    <a href="https://www.curseforge.com/wow/addons/PROJECT_SLUG/files">
-      <img src="https://img.shields.io/curseforge/v/PROJECT_ID?logo=curseforge&label=version"></a>
-    <img src="https://img.shields.io/curseforge/game-versions/PROJECT_ID?label=game%20version">
-  </p>
--->
+<p align="center">
+  <a href="https://www.curseforge.com/wow/addons/party-member-marker">
+    <img src="https://img.shields.io/curseforge/dt/1592276?logo=curseforge&label=CurseForge"></a>
+  <a href="https://www.curseforge.com/wow/addons/party-member-marker/files">
+    <img src="https://img.shields.io/curseforge/v/1592276?logo=curseforge&label=version"></a>
+  <img src="https://img.shields.io/curseforge/game-versions/1592276?label=game%20version">
+</p>
 
 ---
 
@@ -33,20 +29,21 @@ It also keeps things tidy: **friendly** nameplates are stripped down to a clean,
 name-only look (like the native "nameplates off" view), while **enemy**
 nameplates are left completely untouched.
 
-Tested in **Mists of Pandaria Classic (5.5.4)** and **Burning Crusade Classic
-Anniversary (2.5.6)**. The same release archive supports both clients.
+Tested in **Mists of Pandaria Classic (5.5.4)**, **Burning Crusade Classic
+Anniversary (2.5.6)**, and **WoW Forever (1.60.1)**. All three clients use the
+same Lua file and a client-specific TOC.
 
-## Anniversary installation
+## Local installation
 
-Run `./deploy-anniversary.sh` from this Git checkout to copy the Lua file and
-`PartyMembersMarker_TBC.toc` into the adjacent
-`_anniversary_/Interface/AddOns/PartyMembersMarker` directory. The script can
-be run again after CurseForge updates the game copy. The checkout and its Git
-history stay outside `AddOns`; the game copy contains only runtime files.
+Run `./deploy-anniversary.sh` or `./deploy-forever.sh` from this Git checkout to
+copy the Lua file and the matching TOC into the adjacent client AddOns directory.
+Run the same script again after CurseForge updates the game copy. The checkout
+and its Git history stay outside `AddOns`; the game copy contains only runtime
+files.
 
 Run `./package-release.sh` to build a CurseForge-ready ZIP containing one
-`PartyMembersMarker` folder with the shared Lua file and both TOCs. Upload that
-one ZIP and select both supported game versions on the CurseForge file page.
+`PartyMembersMarker` folder with the shared Lua file and all three TOCs. Upload
+that one ZIP and select the supported game versions on the CurseForge file page.
 
 ## Features
 
@@ -68,7 +65,8 @@ one ZIP and select both supported game versions on the CurseForge file page.
   cleaned up, turn them off automatically on entering and restore your setting on
   leaving.
 - **In-game options** — class-icon size (with a live preview), icon scope, font,
-  and separate name size + outline for players and NPCs.
+  and separate name size + outline for players and NPCs. Cyrillic text uses the
+  matching Cyrillic face of the chosen font.
 
 ## How to use
 
@@ -113,5 +111,5 @@ A detailed technical overview of the architecture and rendering decisions is in
 
 ## Feedback
 
-Bug reports and suggestions are welcome in the CurseForge comments _(project
-link coming soon)_.
+Bug reports and suggestions are welcome in the
+[CurseForge comments](https://www.curseforge.com/wow/addons/party-member-marker/comments).

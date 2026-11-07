@@ -4,8 +4,9 @@ It also keeps things tidy: **friendly** nameplates are stripped down to a clean,
 
 ![Party Members Marker preview](https://media.forgecdn.net/attachments/1763/242/image33-png.png)
 
-Tested in **Mists of Pandaria Classic (5.5.4)** and **Burning Crusade Classic
-Anniversary (2.5.6)**. One release supports both versions.
+Tested in **Mists of Pandaria Classic (5.5.4)**, **Burning Crusade Classic
+Anniversary (2.5.6)**, and **WoW Forever (1.60.1)**. One release supports all
+three versions.
 
 ## Features
 
@@ -16,7 +17,7 @@ Anniversary (2.5.6)**. One release supports both versions.
 *   **Smart name colors** — player names are tinted by class and show an `<Away>` / `<Busy>` status prefix; **NPC names reflect your reputation** with their faction (green / yellow / red).
 *   **Cleaner look** — the native raid target marker is hidden on friendly plates.
 *   **Auto-disable in dungeons/raids** — inside PvE instances the game protects (forbids) friendly nameplates, so the addon can't mark them with the class icon and they just clutter the screen. When that happens the addon turns friendly nameplates off automatically and restores your previous setting when you leave. **On by default.**
-*   **In-game options** — adjust the class-icon size (with a live preview), the icon scope, the font, and the name size & outline (separately for players and NPCs).
+*   **In-game options** — adjust the class-icon size (with a live preview), the icon scope, the font, and the name size & outline (separately for players and NPCs). Cyrillic names use a matching Cyrillic font face.
 
 ## How to use
 

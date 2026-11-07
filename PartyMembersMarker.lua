@@ -5,10 +5,22 @@ PMM.platesByUnit = {} -- [unitToken] = plate, kept until NAME_PLATE_UNIT_REMOVED
 PMM.text   = {}      -- [plate] = { name = FontString, sub = FontString }
 PMM.factionStanding = {}  -- [factionName] = standingID (1-8), for NPC rep coloring
 
+-- Forever can make unit data secret during combat. A secret can be passed to
+-- some UI setters, but cannot be tested, concatenated, or used as a table key.
+-- On older clients issecretvalue is absent, so this is a no-op there.
+local function PublicValue(value)
+    if issecretvalue and issecretvalue(value) then return nil end
+    return value
+end
+
+local function IsPlayerUnit(unitToken)
+    return PublicValue(UnitIsPlayer(unitToken)) and true or false
+end
+
 -- ---- Tunables --------------------------------------------------------------
 -- Font file. nil = clone the native nameplate name font (FRIZQT__ on most
 -- clients). Set a path to override, e.g. "Fonts\\MORPHEUS.TTF". Any custom
--- font must contain Cyrillic glyphs.
+-- font is replaced by a matching Cyrillic face for Cyrillic text below.
 local FONT_FILE       = STANDARD_TEXT_FONT  -- nil = native plate font; here the locale default UI font
 local NAME_SIZE       = 10         -- nil = use the native size; or a number, e.g. 14
 local NAME_OUTLINE    = "OUTLINE"  -- "" / "OUTLINE" / "THICKOUTLINE" (bold effect)
@@ -59,12 +71,27 @@ local FONTS = {
 }
 local FONT_BY_KEY, FONT_LABEL_BY_KEY = {}, {}
 for _, f in ipairs(FONTS) do FONT_BY_KEY[f.key] = f.path; FONT_LABEL_BY_KEY[f.key] = f.label end
+local CYRILLIC_FONT_BY_KEY = {
+    DEFAULT = "Fonts\\FRIZQT___CYR.TTF",
+    ARIALN = "Fonts\\ARIALN.TTF",
+    MORPHEUS = "Fonts\\MORPHEUS_CYR.TTF",
+    SKURRI = "Fonts\\SKURRI_CYR.TTF",
+}
 
 local function GetFontKey()
     return (PartyMembersMarkerDB and PartyMembersMarkerDB.fontKey) or "DEFAULT"
 end
 local function GetFontFile()
     return FONT_BY_KEY[GetFontKey()] or FONT_FILE
+end
+local function GetFontFileForText(text)
+    -- Western-client Friz/Morpheus/Skurri lack Cyrillic glyphs. Switch only
+    -- strings containing Cyrillic to the matching built-in Cyrillic face;
+    -- the Cyrillic Friz face lacks some accented Latin glyphs.
+    if text and text:find("[\208-\212]") then
+        return CYRILLIC_FONT_BY_KEY[GetFontKey()] or CYRILLIC_FONT_BY_KEY.DEFAULT
+    end
+    return GetFontFile()
 end
 local function GetPlayerNameSize()
     return (PartyMembersMarkerDB and PartyMembersMarkerDB.nameSizePlayer) or NAME_SIZE or 12
@@ -73,7 +100,7 @@ local function GetNPCNameSize()
     return (PartyMembersMarkerDB and PartyMembersMarkerDB.nameSizeNPC) or NAME_SIZE or 12
 end
 local function GetNameSizeFor(unitToken)
-    if UnitIsPlayer(unitToken) then return GetPlayerNameSize() else return GetNPCNameSize() end
+    if IsPlayerUnit(unitToken) then return GetPlayerNameSize() else return GetNPCNameSize() end
 end
 local function GetPlayerOutline()
     if PartyMembersMarkerDB and PartyMembersMarkerDB.nameOutlinePlayer ~= nil then
@@ -88,7 +115,7 @@ local function GetNPCOutline()
     return NAME_OUTLINE ~= ""
 end
 local function GetOutlineFor(unitToken)
-    local on = UnitIsPlayer(unitToken) and GetPlayerOutline() or GetNPCOutline()
+    local on = IsPlayerUnit(unitToken) and GetPlayerOutline() or GetNPCOutline()
     return on and "OUTLINE" or ""
 end
 
@@ -102,7 +129,7 @@ end
 -- Keep the older fields for MoP Classic, which uses the same Lua file.
 local BAR_REGIONS = {
     "HealthBarsContainer", "CastBarsContainer", "healthBar", "castBar",
-    "LevelFrame", "ClassificationFrame",
+    "LevelFrame", "PlayerLevelDiffFrame", "ClassificationFrame",
 }
 
 local function SetRegionsShown(uf, shown)
@@ -110,7 +137,15 @@ local function SetRegionsShown(uf, shown)
     for _, key in ipairs(BAR_REGIONS) do
         local region = uf[key]
         if region and region.SetShown then
-            region:SetShown(shown)
+            -- Forever owns this frame's visibility; on restore let Blizzard
+            -- recalculate it instead of unconditionally showing a level badge.
+            if shown and key == "PlayerLevelDiffFrame" then
+                if CompactUnitFrame_UpdatePlayerLevelDiff then
+                    pcall(CompactUnitFrame_UpdatePlayerLevelDiff, uf)
+                end
+            else
+                region:SetShown(shown)
+            end
         end
     end
 end
@@ -122,7 +157,7 @@ scanTip:SetOwner(WorldFrame, "ANCHOR_NONE")
 local function ScanLine(i)
     local line = _G["PMMScanTooltipTextLeft" .. i]
     local text = line and line:GetText()
-    if text then
+    if PublicValue(text) then
         text = text:gsub("^%s+", ""):gsub("%s+$", "")
         if text ~= "" then return text end
     end
@@ -132,7 +167,7 @@ end
 -- NPC occupation/title (e.g. "Bread Vendor"), normalised to "<...>".
 local function GetUnitOccupation(unitToken)
     scanTip:ClearLines()
-    scanTip:SetUnit(unitToken)
+    if not pcall(scanTip.SetUnit, scanTip, unitToken) then return nil end
 
     for i = 2, 4 do
         local text = ScanLine(i)
@@ -150,8 +185,8 @@ end
 
 -- Second line under the name: player guild or NPC occupation, in <...> form.
 local function GetSubText(unitToken)
-    if UnitIsPlayer(unitToken) then
-        local guild = GetGuildInfo(unitToken)
+    if IsPlayerUnit(unitToken) then
+        local guild = PublicValue(GetGuildInfo(unitToken))
         return guild and ("<" .. guild .. ">") or nil
     end
     return GetUnitOccupation(unitToken)
@@ -159,10 +194,12 @@ end
 
 -- Name with the AFK/DND status prefix (UnitName/UnitPVPName don't include it).
 local function GetDisplayName(unitToken)
-    local name = UnitPVPName(unitToken) or UnitName(unitToken) or ""
-    if UnitIsAFK(unitToken) then
+    local name = PublicValue(UnitPVPName and UnitPVPName(unitToken))
+        or PublicValue(UnitName(unitToken))
+    if not name then return nil end
+    if PublicValue(UnitIsAFK(unitToken)) then
         return (CHAT_FLAG_AFK or "<Away> ") .. name
-    elseif UnitIsDND(unitToken) then
+    elseif PublicValue(UnitIsDND(unitToken)) then
         return (CHAT_FLAG_DND or "<Busy> ") .. name
     end
     return name
@@ -225,11 +262,11 @@ end
 -- Your standing with an NPC's faction, read from its tooltip faction line.
 local function GetNPCFactionStanding(unitToken)
     scanTip:ClearLines()
-    scanTip:SetUnit(unitToken)
+    if not pcall(scanTip.SetUnit, scanTip, unitToken) then return nil end
     for i = 2, 6 do
         local line = _G["PMMScanTooltipTextLeft" .. i]
         local text = line and line:GetText()
-        if text and PMM.factionStanding[text] then
+        if PublicValue(text) and PMM.factionStanding[text] then
             return PMM.factionStanding[text]
         end
     end
@@ -237,15 +274,16 @@ local function GetNPCFactionStanding(unitToken)
 end
 
 local function GetNameColor(unitToken)
-    if UnitIsPlayer(unitToken) then
-        local _, class = UnitClass(unitToken)
+    if IsPlayerUnit(unitToken) then
+        local _, rawClass = UnitClass(unitToken)
+        local class = PublicValue(rawClass)
         local c = class and (CUSTOM_CLASS_COLORS or RAID_CLASS_COLORS)[class]
         if c then return c.r, c.g, c.b end
         return 1, 1, 1              -- fallback: white
     end
     -- NPC: color by your reputation standing with its faction when known,
     -- else fall back to its reaction. 1-3 hostile, 4 neutral, 5+ friendly.
-    local rank = GetNPCFactionStanding(unitToken) or UnitReaction("player", unitToken)
+    local rank = GetNPCFactionStanding(unitToken) or PublicValue(UnitReaction("player", unitToken))
     if rank then
         if rank <= 3 then
             return 1, 0.1, 0.1      -- hostile / low rep: red
@@ -304,13 +342,16 @@ local function LabelHide(label)
 end
 
 -- Apply font/size/outline to a plate's name + sub labels (and outline copies).
-local function ApplyLabelFonts(t, file, nameSize, flag)
-    if not file then return end
+local function ApplyLabelFonts(t, nameFile, subFile, nameSize, flag)
     local subSize = math.max(nameSize + SUB_SIZE_DELTA, 1)
-    t.name.main:SetFont(file, nameSize, flag)
-    for _, c in ipairs(t.name.copies) do c:SetFont(file, nameSize, flag) end
-    t.sub.main:SetFont(file, subSize, flag)
-    for _, c in ipairs(t.sub.copies) do c:SetFont(file, subSize, flag) end
+    if nameFile then
+        t.name.main:SetFont(nameFile, nameSize, flag)
+        for _, c in ipairs(t.name.copies) do c:SetFont(nameFile, nameSize, flag) end
+    end
+    if subFile then
+        t.sub.main:SetFont(subFile, subSize, flag)
+        for _, c in ipairs(t.sub.copies) do c:SetFont(subFile, subSize, flag) end
+    end
 end
 
 -- Lazily build our name + sub labels, mirroring the native name's font.
@@ -385,10 +426,12 @@ end
 
 -- Friendly = a unit we would not attack (friendly players and friendly NPCs).
 local function IsFriendlyUnit(unitToken)
-    if UnitCanAttack("player", unitToken) then
+    local attackable = UnitCanAttack("player", unitToken)
+    if issecretvalue and issecretvalue(attackable) then return nil end
+    if attackable then
         return false
     end
-    return UnitIsFriend("player", unitToken)
+    return PublicValue(UnitIsFriend("player", unitToken))
 end
 
 -- Whether the class icon should show for this player, per the configured scope.
@@ -397,9 +440,9 @@ local function PlayerInIconScope(unitToken)
     if scope == "all" then
         return true
     elseif scope == "raid" then
-        return UnitInRaid(unitToken) and true or false
+        return PublicValue(UnitInRaid(unitToken)) and true or false
     else -- "party"
-        return UnitInParty(unitToken) and true or false
+        return PublicValue(UnitInParty(unitToken)) and true or false
     end
 end
 
@@ -414,6 +457,8 @@ local function RestoreNativeFrame(uf)
 end
 
 local function ApplyFriendly(plate, unitToken)
+    local displayName = GetDisplayName(unitToken)
+    if not displayName then return end
     local uf = plate.UnitFrame
     if not uf then return end
     if PMM.hidden[plate] and PMM.hidden[plate] ~= uf then
@@ -454,15 +499,17 @@ local function ApplyFriendly(plate, unitToken)
     local t = GetText(plate)
     if not t then return end
 
-    -- Apply the per-unit-type font size + outline (player vs NPC).
-    ApplyLabelFonts(t, GetFontFile(), GetNameSizeFor(unitToken), GetOutlineFor(unitToken))
+    local subText = GetSubText(unitToken)
+    -- Choose each line's font independently: a Latin player name may have a
+    -- Cyrillic guild name (or the reverse).
+    ApplyLabelFonts(t, GetFontFileForText(displayName), GetFontFileForText(subText),
+        GetNameSizeFor(unitToken), GetOutlineFor(unitToken))
 
     local r, g, b = GetNameColor(unitToken)
-    LabelSetText(t.name, GetDisplayName(unitToken))
+    LabelSetText(t.name, displayName)
     LabelSetColor(t.name, r, g, b)
     LabelShow(t.name)
 
-    local subText = GetSubText(unitToken)
     if subText then
         LabelSetText(t.sub, subText)
         LabelSetColor(t.sub, r, g, b)
@@ -473,8 +520,9 @@ local function ApplyFriendly(plate, unitToken)
 
     -- Class icon: friendly players in scope, when the class is resolved.
     local coords
-    if SHOW_CLASS_ICON and UnitIsPlayer(unitToken) and PlayerInIconScope(unitToken) then
-        local _, class = UnitClass(unitToken)
+    if SHOW_CLASS_ICON and IsPlayerUnit(unitToken) and PlayerInIconScope(unitToken) then
+        local _, rawClass = UnitClass(unitToken)
+        local class = PublicValue(rawClass)
         coords = class and CLASS_ICON_TCOORDS and CLASS_ICON_TCOORDS[class]
     end
     if coords then
@@ -514,7 +562,7 @@ local function UpdateNameplate(unitToken)
     if not plate then return end
     if plate.UnitFrame and plate.UnitFrame:IsForbidden() then return end  -- skip forbidden plates
 
-    if IsFriendlyUnit(unitToken) then
+    if IsFriendlyUnit(unitToken) and GetDisplayName(unitToken) then
         ApplyFriendly(plate, unitToken)
     else
         RestorePlate(plate)
@@ -542,14 +590,14 @@ end
 -- "hostile" would permanently un-skin a genuinely friendly plate (no further
 -- health-color update fires for an idle player to correct it).
 local function ReclassifyPlate(plate, unitToken)
-    if not plate or not unitToken or not UnitExists(unitToken) then return end
+    if not plate or not unitToken or not PublicValue(UnitExists(unitToken)) then return end
     if PMM.hidden[plate] or PMM.hiddenFrames[plate.UnitFrame] then
         -- We have it skinned as friendly; only un-skin once it's actually
         -- attackable (a duel started).
-        if UnitCanAttack("player", unitToken) then
+        if PublicValue(UnitCanAttack("player", unitToken)) or not GetDisplayName(unitToken) then
             RestorePlate(plate)
         end
-    elseif IsFriendlyUnit(unitToken) then
+    elseif IsFriendlyUnit(unitToken) and GetDisplayName(unitToken) then
         -- Not skinned but now friendly (a duel ended) -> re-apply our skin.
         ApplyFriendly(plate, unitToken)
     end
@@ -619,12 +667,13 @@ end
 -- Re-apply font/size/outline to all existing labels (after a text setting
 -- changes), picking the player or NPC size per plate's current unit.
 local function RefreshFonts()
-    local file = GetFontFile()
-    if not file then return end
     for plate, t in pairs(PMM.text) do
         local unit = (plate.UnitFrame and plate.UnitFrame.unit) or plate.namePlateUnitToken
         if unit then
-            ApplyLabelFonts(t, file, GetNameSizeFor(unit), GetOutlineFor(unit))
+            local nameText = PublicValue(t.name.main:GetText())
+            local subText = PublicValue(t.sub.main:GetText())
+            ApplyLabelFonts(t, GetFontFileForText(nameText), GetFontFileForText(subText),
+                GetNameSizeFor(unit), GetOutlineFor(unit))
         end
     end
 end
@@ -1031,7 +1080,7 @@ if CompactUnitFrame_UpdateName then
         end
         local unit = uf.unit
         if not unit or not unit:match("^nameplate") then return end
-        if uf.name and IsFriendlyUnit(unit) then
+        if PMM.hiddenFrames[uf] and uf.name and IsFriendlyUnit(unit) then
             uf.name:Hide()
         end
     end)
@@ -1068,16 +1117,16 @@ SlashCmdList["PMM"] = function(msg)
         return
     end
     local unit = "target"
-    if not UnitExists(unit) then
+    if not PublicValue(UnitExists(unit)) then
         print("|cff00ff00PMM|r: no target")
         return
     end
     scanTip:ClearLines()
-    scanTip:SetUnit(unit)
-    print("|cff00ff00PMM|r tooltip lines for", UnitName(unit) or "?", ":")
+    if not pcall(scanTip.SetUnit, scanTip, unit) then return end
+    print("|cff00ff00PMM|r tooltip lines for", PublicValue(UnitName(unit)) or "?", ":")
     for i = 1, 6 do
         local line = _G["PMMScanTooltipTextLeft" .. i]
-        print(i, line and line:GetText() or "<nil>")
+        print(i, PublicValue(line and line:GetText()) or "<nil>")
     end
 
     local plate = C_NamePlate.GetNamePlateForUnit(unit)

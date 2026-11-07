@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.4.0
+- Added WoW Forever 1.60.1 support alongside Mists of Pandaria Classic 5.5.4 and Burning Crusade Classic Anniversary 2.5.6.
+- Accounted for Forever's protected unit data and new level frame on nameplates.
+- Fixed Cyrillic player and guild names appearing as squares on a Western-language client by selecting the matching Cyrillic font face only for Cyrillic text.
+- Added a repeatable Forever installation script and a single release archive for all three clients.
+
 ## v1.3.0
 - Added support for Burning Crusade Classic Anniversary 2.5.6 while retaining Mists of Pandaria Classic 5.5.4 support in the same release.
 - Updated friendly nameplate handling for Anniversary's health/cast containers and reputation API.

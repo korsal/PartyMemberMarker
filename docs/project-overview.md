@@ -17,14 +17,16 @@ Files:
 PartyMembersMarker/
 ├── PartyMembersMarker.toc   # Interface 50504, SavedVariables: PartyMembersMarkerDB
 ├── PartyMembersMarker_TBC.toc # Interface 20506, same Lua entry point
+├── PartyMembersMarker_Forever.toc # Interface 16001, same Lua entry point
 ├── PartyMembersMarker.lua   # entire addon (single file)
 ├── README.md                # CurseForge/GitHub readme
 ├── icon.png                 # project avatar (export-ignored from the release zip)
 └── docs/project-overview.md # this document
 ```
 
-Target clients: **MoP Classic 5.5.4** (interface `50504`) and **Burning
-Crusade Classic Anniversary 2.5.6** (interface `20506`).
+Target clients: **MoP Classic 5.5.4** (interface `50504`), **Burning
+Crusade Classic Anniversary 2.5.6** (interface `20506`), and **WoW Forever
+1.60.1** (interface `16001`).
 Saved variables: `PartyMembersMarkerDB`. Slash: `/pmm` (debug) / `/pmm config`.
 
 ---
@@ -41,7 +43,8 @@ reused for an enemy).
 
 1. Native bar regions hidden: `healthBar`, `castBar`, `LevelFrame`,
    `ClassificationFrame`, `RaidTargetFrame`, plus Anniversary's
-   `HealthBarsContainer` and `CastBarsContainer`.
+   `HealthBarsContainer` and `CastBarsContainer` and Forever's
+   `PlayerLevelDiffFrame`.
 2. Native **name** hidden; the addon draws its own name (controls
    font/size/outline/position/color and adds a status prefix).
 3. Name text = `UnitPVPName` (player title included) + `<Away>`/`<Busy>` AFK/DND
