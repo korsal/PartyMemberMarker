@@ -452,7 +452,14 @@ local function RestoreNativeFrame(uf)
     -- return to their native state, even if the old unit token is still set.
     PMM.hiddenFrames[uf] = nil
     SetRegionsShown(uf, true)
-    if uf.name then uf.name:Show() end
+    -- Recompute the native text and its visibility for the frame's current
+    -- unit. Showing the FontString directly can reveal a previous unit's name
+    -- after Blizzard pools the frame for another plate.
+    if CompactUnitFrame_UpdateName then
+        pcall(CompactUnitFrame_UpdateName, uf)
+    elseif uf.name then
+        uf.name:Show()
+    end
     if uf.unit and uf.UpdateRaidTarget then pcall(uf.UpdateRaidTarget, uf) end
 end
 
@@ -543,10 +550,9 @@ local function RestorePlate(plate)
 
     local uf = plate.UnitFrame
     if uf ~= hiddenFrame then RestoreNativeFrame(uf) end
-    if uf and uf.name then uf.name:Show() end
-
-    -- Let Blizzard restore the raid target's actual visibility for this unit.
-    if uf and uf.UpdateRaidTarget then pcall(uf.UpdateRaidTarget, uf) end
+    -- Do not touch an unmodified native frame. In particular, forcing its name
+    -- visible can expose stale text when Blizzard reuses it for another plate
+    -- (including an interactable object such as an ore node).
 
     local t = PMM.text[plate]
     if t then
