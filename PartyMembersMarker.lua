@@ -42,6 +42,7 @@ local ICON_SCOPE      = "party"
 local ICON_SIZE       = 48         -- class icon size, px
 local ICON_GAP        = 8          -- gap between icon bottom and name top, px
 local ICON_BORDER     = 4          -- class-colored rim thickness around the icon, px
+local LEVEL_BADGE_RATIO = 0.36    -- small level circle at the badge's lower-left edge
 local RAID_MARKER_SIZE_RATIO = 0.7 -- raid marker over the class badge
 local RAID_MARKER_NAME_GAP = 4     -- space between the marker and an unbadged name
 -- ---------------------------------------------------------------------------
@@ -51,6 +52,13 @@ local ICON_SIZE_MIN = 16
 local ICON_SIZE_MAX = 96
 local ICON_BORDER_MIN = 0
 local ICON_BORDER_MAX = 16
+local LEVEL_BADGE_SIZE_MIN = 18
+local LEVEL_BADGE_SIZE_MAX = 48
+local LEVEL_BADGE_BORDER_MIN = 0
+local LEVEL_BADGE_BORDER_MAX = 4
+local LEVEL_BADGE_BORDER = 1
+local LEVEL_BADGE_FONT_MIN = 8
+local LEVEL_BADGE_FONT_MAX = 28
 
 local function GetIconSize()
     return (PartyMembersMarkerDB and PartyMembersMarkerDB.iconSize) or ICON_SIZE
@@ -58,6 +66,20 @@ end
 
 local function GetIconBorder()
     return (PartyMembersMarkerDB and PartyMembersMarkerDB.iconBorder) or ICON_BORDER
+end
+
+local function GetLevelBadgeSize(iconSize)
+    return (PartyMembersMarkerDB and PartyMembersMarkerDB.levelBadgeSize)
+        or math.max(LEVEL_BADGE_SIZE_MIN, math.floor(iconSize * LEVEL_BADGE_RATIO + 0.5))
+end
+
+local function GetLevelBadgeBorder()
+    return (PartyMembersMarkerDB and PartyMembersMarkerDB.levelBadgeBorder) or LEVEL_BADGE_BORDER
+end
+
+local function GetLevelBadgeFontSize(badgeSize)
+    return (PartyMembersMarkerDB and PartyMembersMarkerDB.levelBadgeFontSize)
+        or math.max(10, math.floor(badgeSize * 0.55 + 0.5))
 end
 
 local function GetIconScope()
@@ -78,6 +100,10 @@ end
 
 local function GetShowFriendlyRaidMarkers()
     return PartyMembersMarkerDB and PartyMembersMarkerDB.showFriendlyRaidMarkers == true
+end
+
+local function GetShowPlayerLevels()
+    return PartyMembersMarkerDB and PartyMembersMarkerDB.showPlayerLevels == true
 end
 
 -- Name text styling (configurable via the settings panel).
@@ -375,6 +401,73 @@ local function ApplyLabelFonts(t, nameFile, subFile, nameSize, flag)
     end
 end
 
+local function SizeLevelBadge(badge, iconSize)
+    local size = GetLevelBadgeSize(iconSize)
+    badge:SetSize(size, size)
+    local fillSize = size - GetLevelBadgeBorder() * 2
+    badge.fill:SetSize(fillSize, fillSize)
+    badge.text:SetFont(STANDARD_TEXT_FONT or "Fonts\\FRIZQT__.TTF",
+        GetLevelBadgeFontSize(size), "OUTLINE")
+    badge:ClearAllPoints()
+    badge:SetPoint("CENTER", badge.icon, "BOTTOMLEFT", iconSize * 0.15, iconSize * 0.15)
+end
+
+local function CreateLevelBadge(parent, icon, iconSize)
+    local badge = CreateFrame("Frame", nil, parent)
+    badge.icon = icon
+    local rim = badge:CreateTexture(nil, "ARTWORK")
+    rim:SetTexture("Interface\\Buttons\\WHITE8X8")
+    rim:SetVertexColor(0.88, 0.68, 0.28)
+    rim:SetAllPoints(badge)
+    if rim.SetSnapToPixelGrid then rim:SetSnapToPixelGrid(false) end
+    if rim.SetTexelSnappingBias then rim:SetTexelSnappingBias(0) end
+    local fill = badge:CreateTexture(nil, "ARTWORK", nil, 1)
+    fill:SetTexture("Interface\\Buttons\\WHITE8X8")
+    fill:SetVertexColor(0.05, 0.04, 0.03, 0.95)
+    fill:SetPoint("CENTER")
+    if fill.SetSnapToPixelGrid then fill:SetSnapToPixelGrid(false) end
+    if fill.SetTexelSnappingBias then fill:SetTexelSnappingBias(0) end
+    badge.fill = fill
+    if badge.CreateMaskTexture then
+        local rimMask = badge:CreateMaskTexture()
+        rimMask:SetTexture("Interface\\Masks\\CircleMaskScalable", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+        rimMask:SetAllPoints(rim)
+        rim:AddMaskTexture(rimMask)
+        local fillMask = badge:CreateMaskTexture()
+        fillMask:SetTexture("Interface\\Masks\\CircleMaskScalable", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+        fillMask:SetAllPoints(fill)
+        fill:AddMaskTexture(fillMask)
+    end
+    local number = badge:CreateFontString(nil, "OVERLAY")
+    -- Use the same bounds as the circles. An auto-sized FontString can round
+    -- its center separately as a nameplate moves and changes screen scale.
+    number:SetAllPoints(badge)
+    number:SetJustifyH("CENTER")
+    number:SetJustifyV("MIDDLE")
+    if number.SetSmoothScaling then number:SetSmoothScaling(true) end
+    if number.SetSnapToPixelGrid then number:SetSnapToPixelGrid(false) end
+    if number.SetRoundLayoutToNearestPixel then number:SetRoundLayoutToNearestPixel(false) end
+    number:SetTextColor(1, 0.84, 0.45)
+    badge.text = number
+    SizeLevelBadge(badge, iconSize)
+    badge:Hide()
+    return badge
+end
+
+local function UpdateLevelBadge(badge, unitToken, enabled)
+    if not enabled or not unitToken then badge:Hide(); return end
+    local ok, level = pcall(UnitLevel, unitToken)
+    if not ok then badge:Hide(); return end
+    -- Forever may return a secret level. Pass it directly to SetText without
+    -- comparing or concatenating it; reject only a public unknown level.
+    if not (issecretvalue and issecretvalue(level)) and
+        (type(level) ~= "number" or level < 1) then
+        badge:Hide()
+        return
+    end
+    if pcall(badge.text.SetText, badge.text, level) then badge:Show() else badge:Hide() end
+end
+
 -- Lazily build our name + sub labels, mirroring the native name's font.
 local function GetText(plate)
     local uf = plate.UnitFrame
@@ -426,6 +519,7 @@ local function GetText(plate)
     icon:Hide()
 
     border:SetPoint("CENTER", icon, "CENTER", 0, 0)
+    local levelBadge = CreateLevelBadge(holder, icon, iconSize)
 
     -- Smooth both circles' hard edges with a soft circle mask.
     if holder.CreateMaskTexture then
@@ -442,7 +536,8 @@ local function GetText(plate)
         border:AddMaskTexture(borderMask)
     end
 
-    PMM.text[plate] = { name = name, sub = sub, icon = icon, border = border, holder = holder, unitFrame = uf }
+    PMM.text[plate] = { name = name, sub = sub, icon = icon, border = border,
+        levelBadge = levelBadge, holder = holder, unitFrame = uf }
     return PMM.text[plate]
 end
 
@@ -640,9 +735,11 @@ local function ApplyFriendly(plate, unitToken)
         t.icon:Show()
         t.border:SetVertexColor(r, g, b)   -- class color (same as the name)
         t.border:Show()
+        UpdateLevelBadge(t.levelBadge, unitToken, GetShowPlayerLevels())
     else
         t.icon:Hide()
         t.border:Hide()
+        t.levelBadge:Hide()
     end
     if rt and GetShowFriendlyRaidMarkers() then
         local mode = coords and "icon" or (showName and "name" or (showSub and "sub" or "frame"))
@@ -669,6 +766,7 @@ local function RestorePlate(plate)
         LabelHide(t.sub)
         t.icon:Hide()
         t.border:Hide()
+        t.levelBadge:Hide()
     end
 end
 
@@ -782,6 +880,7 @@ local function RefreshIconSizes()
     for _, t in pairs(PMM.text) do
         if t.icon then t.icon:SetSize(size, size) end
         if t.border then t.border:SetSize(borderSize, borderSize) end
+        if t.levelBadge then SizeLevelBadge(t.levelBadge, size) end
         local uf = t.unitFrame
         if uf and PMM.raidLayoutByFrame[uf] == t and t.raidMode == "icon" then
             PositionRaidTarget(uf, t, "icon")
@@ -858,6 +957,7 @@ local function SetupOptions()
     local pIcon = preview:CreateTexture(nil, "ARTWORK")
     pIcon:SetTexture("Interface\\TargetingFrame\\UI-Classes-Circles")
     pIcon:SetPoint("CENTER")
+    local pLevel = CreateLevelBadge(preview, pIcon, GetIconSize())
 
     if preview.CreateMaskTexture then
         local mi = preview:CreateMaskTexture()
@@ -880,6 +980,22 @@ local function SetupOptions()
         pIcon:SetSize(size, size)
         local borderSize = size + GetIconBorder() * 2
         pBorder:SetSize(borderSize, borderSize)
+        SizeLevelBadge(pLevel, size)
+        UpdateLevelBadge(pLevel, "player", GetShowPlayerLevels())
+    end
+
+    local levelSizeSlider, levelFontSlider
+    local syncingLevelSliders = false
+    local function SyncAutoLevelSliders()
+        if not PartyMembersMarkerDB then return end
+        syncingLevelSliders = true
+        if levelSizeSlider and not PartyMembersMarkerDB.levelBadgeSize then
+            levelSizeSlider:SetValue(GetLevelBadgeSize(GetIconSize()))
+        end
+        if levelFontSlider and not PartyMembersMarkerDB.levelBadgeFontSize then
+            levelFontSlider:SetValue(GetLevelBadgeFontSize(GetLevelBadgeSize(GetIconSize())))
+        end
+        syncingLevelSliders = false
     end
 
     -- Icon size slider with +/- arrow steppers.
@@ -899,6 +1015,7 @@ local function SetupOptions()
         if PartyMembersMarkerDB then
             PartyMembersMarkerDB.iconSize = value
             RefreshIconSizes()
+            SyncAutoLevelSliders()
         end
     end)
     MakeStepper(slider, true, function()
@@ -943,6 +1060,57 @@ local function SetupOptions()
     scopeHeader:SetPoint("TOPLEFT", borderSlider, "BOTTOMLEFT", 0, -40)
     scopeHeader:SetText("Show class icon for:")
 
+    local levelCheck = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
+    levelCheck:SetPoint("TOPLEFT", scopeHeader, "TOPLEFT", 265, 4)
+    local levelText = levelCheck:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    levelText:SetPoint("LEFT", levelCheck, "RIGHT", 4, 0)
+    levelText:SetText("Show level on class icons")
+    levelCheck:SetScript("OnClick", function(self)
+        if PartyMembersMarkerDB then
+            PartyMembersMarkerDB.showPlayerLevels = self:GetChecked() and true or false
+        end
+        UpdateAllNameplates()
+        UpdatePreview(GetIconSize())
+    end)
+
+    local function MakeLevelSlider(globalName, anchor, yOffset, label, minValue, maxValue, getter, dbKey)
+        local s = CreateFrame("Slider", globalName, panel, "OptionsSliderTemplate")
+        s:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", anchor == levelCheck and 18 or 0, yOffset)
+        s:SetWidth(180)
+        s:SetMinMaxValues(minValue, maxValue)
+        s:SetValueStep(1)
+        s:SetObeyStepOnDrag(true)
+        _G[globalName .. "Low"]:SetText(tostring(minValue))
+        _G[globalName .. "High"]:SetText(tostring(maxValue))
+        s:SetScript("OnValueChanged", function(_, value)
+            value = math.floor(value + 0.5)
+            _G[globalName .. "Text"]:SetText(label .. ": " .. value)
+            if syncingLevelSliders or not PartyMembersMarkerDB then return end
+            PartyMembersMarkerDB[dbKey] = value
+            RefreshIconSizes()
+            UpdatePreview(GetIconSize())
+            if dbKey == "levelBadgeSize" then SyncAutoLevelSliders() end
+        end)
+        MakeStepper(s, true, function()
+            s:SetValue(math.max(minValue, getter() - 1))
+        end):SetPoint("RIGHT", s, "LEFT", -4, 0)
+        MakeStepper(s, false, function()
+            s:SetValue(math.min(maxValue, getter() + 1))
+        end):SetPoint("LEFT", s, "RIGHT", 4, 0)
+        return s
+    end
+
+    levelSizeSlider = MakeLevelSlider("PMMLevelBadgeSizeSlider", levelCheck, -26,
+        "Level badge size", LEVEL_BADGE_SIZE_MIN, LEVEL_BADGE_SIZE_MAX,
+        function() return GetLevelBadgeSize(GetIconSize()) end, "levelBadgeSize")
+    local levelBorderSlider = MakeLevelSlider("PMMLevelBadgeBorderSlider", levelSizeSlider, -34,
+        "Level badge border", LEVEL_BADGE_BORDER_MIN, LEVEL_BADGE_BORDER_MAX,
+        GetLevelBadgeBorder, "levelBadgeBorder")
+    levelFontSlider = MakeLevelSlider("PMMLevelBadgeFontSlider", levelBorderSlider, -34,
+        "Level font size", LEVEL_BADGE_FONT_MIN, LEVEL_BADGE_FONT_MAX,
+        function() return GetLevelBadgeFontSize(GetLevelBadgeSize(GetIconSize())) end,
+        "levelBadgeFontSize")
+
     local SCOPE_OPTIONS = {
         { value = "all",   label = "All players" },
         { value = "party", label = "Party members" },
@@ -984,7 +1152,7 @@ local function SetupOptions()
 
     -- Hide friendly nameplates inside instances (where they're protected).
     local instCheck = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
-    instCheck:SetPoint("TOPLEFT", scopeButtons[#scopeButtons], "BOTTOMLEFT", 0, -14)
+    instCheck:SetPoint("TOPLEFT", levelFontSlider, "BOTTOMLEFT", -283, -22)
     local instText = instCheck:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     instText:SetPoint("LEFT", instCheck, "RIGHT", 4, 0)
     instText:SetText("Auto-disable friendly nameplates when the client blocks marking them with the class icon")
@@ -1123,6 +1291,14 @@ local function SetupOptions()
         local border = GetIconBorder()
         borderSlider:SetValue(border)
         PMMIconBorderSliderText:SetText("Border thickness: " .. border)
+        syncingLevelSliders = true
+        levelSizeSlider:SetValue(GetLevelBadgeSize(size))
+        levelBorderSlider:SetValue(GetLevelBadgeBorder())
+        levelFontSlider:SetValue(GetLevelBadgeFontSize(GetLevelBadgeSize(size)))
+        syncingLevelSliders = false
+        PMMLevelBadgeSizeSliderText:SetText("Level badge size: " .. GetLevelBadgeSize(size))
+        PMMLevelBadgeBorderSliderText:SetText("Level badge border: " .. GetLevelBadgeBorder())
+        PMMLevelBadgeFontSliderText:SetText("Level font size: " .. GetLevelBadgeFontSize(GetLevelBadgeSize(size)))
         UpdatePreview(size)
         SyncScopeButtons()
 
@@ -1137,6 +1313,7 @@ local function SetupOptions()
         end
         playerNameCheck:SetChecked(GetShowPlayerNames())
         playerGuildCheck:SetChecked(GetShowPlayerGuilds())
+        levelCheck:SetChecked(GetShowPlayerLevels())
         raidMarkerCheck:SetChecked(GetShowFriendlyRaidMarkers())
         instCheck:SetChecked(GetHideFriendlyInInstance())
     end)
@@ -1160,6 +1337,7 @@ frame:RegisterEvent("NAME_PLATE_UNIT_REMOVED")
 frame:RegisterEvent("PLAYER_FLAGS_CHANGED")
 frame:RegisterEvent("GROUP_ROSTER_UPDATE")
 frame:RegisterEvent("UNIT_NAME_UPDATE")
+frame:RegisterEvent("UNIT_LEVEL")
 frame:RegisterEvent("UPDATE_FACTION")
 frame:RegisterEvent("UNIT_FACTION")
 frame:RegisterEvent("PLAYER_ENTERING_WORLD")
@@ -1223,7 +1401,7 @@ frame:SetScript("OnEvent", function(self, event, unit)
         -- AFK/DND toggled, or party/raid roster changed; refresh visible plates.
         UpdateAllNameplates()
 
-    elseif event == "UNIT_NAME_UPDATE" then
+    elseif event == "UNIT_NAME_UPDATE" or event == "UNIT_LEVEL" then
         -- Name/class info just arrived for a unit; refresh its plate so the
         -- class icon can appear once the class is finally known.
         if unit then pcall(UpdateNameplate, unit) end

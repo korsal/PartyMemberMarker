@@ -86,6 +86,9 @@ that one ZIP and select the supported game versions on the CurseForge file page.
   colored ring around it independently, with a live badge preview. Setting
   border thickness to 0 removes the visible ring.
 - **Show class icon for** — All players / Party members / Raid members.
+- **Show level on class icons** — optional small level badge at the lower-left
+  edge of each displayed class icon. Off by default. Adjust its diameter, ring
+  thickness, and font size independently with a live preview.
 - **Name text** — font, plus separate name size and outline for players and NPCs.
 - **Show player names / guilds** — hide either line independently; class icons
   remain visible when both are hidden. Both switches are on by default.
