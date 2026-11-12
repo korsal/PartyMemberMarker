@@ -74,8 +74,9 @@ that one ZIP and select the supported game versions on the CurseForge file page.
 
 1. Install and log in — on first run the addon **enables friendly nameplates**
    for you so it works right away (it only marks plates that are actually shown).
-2. If you ever turn them off, re-enable with **Ctrl+V** — the addon only works
-   while friendly nameplates are shown.
+2. If you ever turn them off, re-enable friendly nameplates with
+   **Ctrl+Shift+V** (or your assigned key binding). The addon only works while
+   friendly nameplates are shown.
 3. Your party/raid members are now marked with their class icon. Open the
    options to customize: **ESC → Options → AddOns → PartyMembersMarker**, or type
    `/pmm config`.
