@@ -82,7 +82,9 @@ that one ZIP and select the supported game versions on the CurseForge file page.
 
 ## Options
 
-- **Icon size** — class-icon diameter, with a live class-badge preview.
+- **Icon size / border thickness** — adjust the class-icon diameter and the
+  colored ring around it independently, with a live badge preview. Setting
+  border thickness to 0 removes the visible ring.
 - **Show class icon for** — All players / Party members / Raid members.
 - **Name text** — font, plus separate name size and outline for players and NPCs.
 - **Show player names / guilds** — hide either line independently; class icons

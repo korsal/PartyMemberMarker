@@ -49,9 +49,15 @@ local RAID_MARKER_NAME_GAP = 4     -- space between the marker and an unbadged n
 -- Configurable (via the settings panel) icon size, persisted in SavedVariables.
 local ICON_SIZE_MIN = 16
 local ICON_SIZE_MAX = 96
+local ICON_BORDER_MIN = 0
+local ICON_BORDER_MAX = 16
 
 local function GetIconSize()
     return (PartyMembersMarkerDB and PartyMembersMarkerDB.iconSize) or ICON_SIZE
+end
+
+local function GetIconBorder()
+    return (PartyMembersMarkerDB and PartyMembersMarkerDB.iconBorder) or ICON_BORDER
 end
 
 local function GetIconScope()
@@ -408,7 +414,8 @@ local function GetText(plate)
     -- rim shows as a colored border.
     local border = holder:CreateTexture(nil, "ARTWORK", nil, -1)
     border:SetTexture("Interface\\Buttons\\WHITE8X8")
-    border:SetSize(iconSize + ICON_BORDER * 2, iconSize + ICON_BORDER * 2)
+    local borderSize = iconSize + GetIconBorder() * 2
+    border:SetSize(borderSize, borderSize)
     border:Hide()
 
     -- Class icon, sits above the name (used for friendly players only).
@@ -771,9 +778,10 @@ end
 -- settings slider changes). Masks track their textures via SetAllPoints.
 local function RefreshIconSizes()
     local size = GetIconSize()
+    local borderSize = size + GetIconBorder() * 2
     for _, t in pairs(PMM.text) do
         if t.icon then t.icon:SetSize(size, size) end
-        if t.border then t.border:SetSize(size + ICON_BORDER * 2, size + ICON_BORDER * 2) end
+        if t.border then t.border:SetSize(borderSize, borderSize) end
         local uf = t.unitFrame
         if uf and PMM.raidLayoutByFrame[uf] == t and t.raidMode == "icon" then
             PositionRaidTarget(uf, t, "icon")
@@ -841,7 +849,7 @@ local function SetupOptions()
     previewLabel:SetText("Preview")
 
     local preview = CreateFrame("Frame", nil, panel)
-    preview:SetSize(ICON_SIZE_MAX + ICON_BORDER * 2, ICON_SIZE_MAX + ICON_BORDER * 2)
+    preview:SetSize(ICON_SIZE_MAX + ICON_BORDER_MAX * 2, ICON_SIZE_MAX + ICON_BORDER_MAX * 2)
 
     local pBorder = preview:CreateTexture(nil, "ARTWORK", nil, -1)
     pBorder:SetTexture("Interface\\Buttons\\WHITE8X8")
@@ -870,7 +878,8 @@ local function SetupOptions()
         local c = class and (CUSTOM_CLASS_COLORS or RAID_CLASS_COLORS)[class]
         if c then pBorder:SetVertexColor(c.r, c.g, c.b) end
         pIcon:SetSize(size, size)
-        pBorder:SetSize(size + ICON_BORDER * 2, size + ICON_BORDER * 2)
+        local borderSize = size + GetIconBorder() * 2
+        pBorder:SetSize(borderSize, borderSize)
     end
 
     -- Icon size slider with +/- arrow steppers.
@@ -903,9 +912,35 @@ local function SetupOptions()
     preview:SetPoint("LEFT", slider, "RIGHT", 60, 0)
     previewLabel:SetPoint("BOTTOM", preview, "TOP", 0, 8)
 
+    -- The ring is a larger circle behind the class icon. Its extra radius is
+    -- the visible thickness, so changing it does not resize the icon itself.
+    local borderSlider = CreateFrame("Slider", "PMMIconBorderSlider", panel, "OptionsSliderTemplate")
+    borderSlider:SetPoint("TOPLEFT", slider, "BOTTOMLEFT", 0, -38)
+    borderSlider:SetWidth(220)
+    borderSlider:SetMinMaxValues(ICON_BORDER_MIN, ICON_BORDER_MAX)
+    borderSlider:SetValueStep(1)
+    borderSlider:SetObeyStepOnDrag(true)
+    PMMIconBorderSliderLow:SetText(tostring(ICON_BORDER_MIN))
+    PMMIconBorderSliderHigh:SetText(tostring(ICON_BORDER_MAX))
+    borderSlider:SetScript("OnValueChanged", function(_, value)
+        value = math.floor(value + 0.5)
+        PMMIconBorderSliderText:SetText("Border thickness: " .. value)
+        if PartyMembersMarkerDB then
+            PartyMembersMarkerDB.iconBorder = value
+            RefreshIconSizes()
+        end
+        UpdatePreview(GetIconSize())
+    end)
+    MakeStepper(borderSlider, true, function()
+        borderSlider:SetValue(math.max(ICON_BORDER_MIN, GetIconBorder() - 1))
+    end):SetPoint("RIGHT", borderSlider, "LEFT", -4, 0)
+    MakeStepper(borderSlider, false, function()
+        borderSlider:SetValue(math.min(ICON_BORDER_MAX, GetIconBorder() + 1))
+    end):SetPoint("LEFT", borderSlider, "RIGHT", 4, 0)
+
     -- Icon scope: show the class icon for all / party / raid (radio group).
     local scopeHeader = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-    scopeHeader:SetPoint("TOPLEFT", slider, "BOTTOMLEFT", 0, -40)
+    scopeHeader:SetPoint("TOPLEFT", borderSlider, "BOTTOMLEFT", 0, -40)
     scopeHeader:SetText("Show class icon for:")
 
     local SCOPE_OPTIONS = {
@@ -1085,6 +1120,9 @@ local function SetupOptions()
         local size = GetIconSize()
         slider:SetValue(size)
         PMMIconSizeSliderText:SetText("Icon size: " .. size)
+        local border = GetIconBorder()
+        borderSlider:SetValue(border)
+        PMMIconBorderSliderText:SetText("Border thickness: " .. border)
         UpdatePreview(size)
         SyncScopeButtons()
 
