@@ -3,6 +3,7 @@ PMM.hidden = {}      -- [plate] = UnitFrame whose bar regions we hid
 PMM.hiddenFrames = setmetatable({}, { __mode = "k" }) -- pooled UnitFrames we hid
 PMM.platesByUnit = {} -- [unitToken] = plate, kept until NAME_PLATE_UNIT_REMOVED
 PMM.text   = {}      -- [plate] = { name = FontString, sub = FontString }
+PMM.raidLayoutByFrame = setmetatable({}, { __mode = "k" }) -- [UnitFrame] = our labels and badge
 PMM.factionStanding = {}  -- [factionName] = standingID (1-8), for NPC rep coloring
 
 -- Forever can make unit data secret during combat. A secret can be passed to
@@ -41,6 +42,8 @@ local ICON_SCOPE      = "party"
 local ICON_SIZE       = 48         -- class icon size, px
 local ICON_GAP        = 8          -- gap between icon bottom and name top, px
 local ICON_BORDER     = 4          -- class-colored rim thickness around the icon, px
+local RAID_MARKER_SIZE_RATIO = 0.7 -- raid marker over the class badge
+local RAID_MARKER_NAME_GAP = 4     -- space between the marker and an unbadged name
 -- ---------------------------------------------------------------------------
 
 -- Configurable (via the settings panel) icon size, persisted in SavedVariables.
@@ -65,6 +68,10 @@ end
 
 local function GetShowPlayerGuilds()
     return not PartyMembersMarkerDB or PartyMembersMarkerDB.showPlayerGuilds ~= false
+end
+
+local function GetShowFriendlyRaidMarkers()
+    return PartyMembersMarkerDB and PartyMembersMarkerDB.showFriendlyRaidMarkers == true
 end
 
 -- Name text styling (configurable via the settings panel).
@@ -131,8 +138,8 @@ end
 -- is hidden via the UpdateName hook below (we draw our own instead).
 -- Regions we force show/hide in bulk. NOTE: RaidTargetFrame is deliberately NOT
 -- here -- it must only ever be visible when the unit actually has a marker, so
--- force-showing it (on restore) reveals its untextured atlas (all 8 markers,
--- tiny). It's hidden for friendly plates explicitly + via a Show hook instead.
+-- force-showing it reveals its untextured atlas (all 8 markers, tiny). Let
+-- Blizzard's raid-target update decide visibility when the option is enabled.
 -- Anniversary 2.5.6 places the health and cast bars in separate containers.
 -- Keep the older fields for MoP Classic, which uses the same Lua file.
 local BAR_REGIONS = {
@@ -428,7 +435,7 @@ local function GetText(plate)
         border:AddMaskTexture(borderMask)
     end
 
-    PMM.text[plate] = { name = name, sub = sub, icon = icon, border = border, unitFrame = uf }
+    PMM.text[plate] = { name = name, sub = sub, icon = icon, border = border, holder = holder, unitFrame = uf }
     return PMM.text[plate]
 end
 
@@ -454,11 +461,66 @@ local function PlayerInIconScope(unitToken)
     end
 end
 
+local function RestoreRaidTargetLayout(uf)
+    local rt = uf and uf.RaidTargetFrame
+    if not rt or not rt.pmmCustomLayout then return end
+    PMM.raidLayoutByFrame[uf] = nil
+    rt.pmmCustomLayout = nil
+    rt:SetScale(1)
+    rt:SetFrameLevel(uf:GetFrameLevel() + 1)
+    rt:ClearAllPoints()
+    -- Match Blizzard's native anchors without reading protected plate points.
+    local showOnlyName = false
+    if uf.IsShowOnlyName then
+        local ok, value = pcall(uf.IsShowOnlyName, uf)
+        showOnlyName = ok and PublicValue(value) == true
+    end
+    if showOnlyName and uf.name then
+        rt:SetPoint("BOTTOM", uf.name, "TOP", 0, 10)
+    else
+        rt:SetPoint("RIGHT", uf.HealthBarsContainer or uf.healthBar or uf, "LEFT", 0, 0)
+    end
+end
+
+local function PositionRaidTarget(uf, t, mode)
+    local rt = uf.RaidTargetFrame
+    if not rt then return end
+    PMM.raidLayoutByFrame[uf] = t
+    t.raidMode = mode
+    rt.pmmCustomLayout = true
+    rt:ClearAllPoints()
+    if mode == "icon" then
+        rt:SetPoint("CENTER", t.icon, "CENTER", 0, 0)
+        rt:SetScale(GetIconSize() * RAID_MARKER_SIZE_RATIO / 22)
+    elseif mode == "name" or mode == "sub" then
+        local label = mode == "name" and t.name.main or t.sub.main
+        rt:SetPoint("BOTTOM", label, "TOP", 0, RAID_MARKER_NAME_GAP)
+        rt:SetScale(1)
+    else
+        -- Player names and guilds can both be hidden while raid markers remain.
+        rt:SetPoint("BOTTOM", uf, "CENTER", 0, VERTICAL_OFFSET + ICON_GAP)
+        rt:SetScale(1)
+    end
+    rt:SetFrameLevel(t.holder:GetFrameLevel() + 1)
+    -- Blizzard may reposition native nameplate regions after a CVar or style
+    -- update. Reapply our placement only while this friendly badge is active.
+    if uf.UpdateAnchors and not uf.pmmRaidAnchorHooked then
+        uf.pmmRaidAnchorHooked = true
+        hooksecurefunc(uf, "UpdateAnchors", function(self)
+            local layout = PMM.raidLayoutByFrame[self]
+            if layout and PMM.hiddenFrames[self] and GetShowFriendlyRaidMarkers() then
+                PositionRaidTarget(self, layout, layout.raidMode)
+            end
+        end)
+    end
+end
+
 local function RestoreNativeFrame(uf)
     if not uf or not PMM.hiddenFrames[uf] then return end
     -- Clear this before Show(): the Show hooks must allow pooled frames to
     -- return to their native state, even if the old unit token is still set.
     PMM.hiddenFrames[uf] = nil
+    RestoreRaidTargetLayout(uf)
     SetRegionsShown(uf, true)
     -- Recompute the native text and its visibility for the frame's current
     -- unit. Showing the FontString directly can reveal a previous unit's name
@@ -486,17 +548,23 @@ local function ApplyFriendly(plate, unitToken)
     end
     if uf and uf.name then uf.name:Hide() end
 
-    -- The native raid marker (RaidTargetFrame) is re-shown by uf:UpdateRaidTarget
-    -- when the marker changes; hook its Show once per plate to keep it hidden
-    -- for friendly units.
+    -- Blizzard owns the raid marker's texture and visibility. SetRaidTargetIndex
+    -- skips its visibility update when the index is unchanged, so after PMM
+    -- has hidden an existing marker we also refresh the shown state explicitly.
     local rt = uf and uf.RaidTargetFrame
     if rt then
-        rt:Hide()   -- keep the native raid marker off friendly plates
         if not rt.pmmHooked then
             rt.pmmHooked = true
             hooksecurefunc(rt, "Show", function(self)
-                if PMM.hiddenFrames[uf] and uf.unit and IsFriendlyUnit(uf.unit) then self:Hide() end
+                if PMM.hiddenFrames[uf] and uf.unit and IsFriendlyUnit(uf.unit)
+                    and not GetShowFriendlyRaidMarkers() then self:Hide() end
             end)
+        end
+        if GetShowFriendlyRaidMarkers() then
+            if uf.unit and uf.UpdateRaidTarget then pcall(uf.UpdateRaidTarget, uf) end
+            if rt.UpdateShownState then pcall(rt.UpdateShownState, rt) end
+        else
+            rt:Hide()
         end
     end
 
@@ -568,6 +636,12 @@ local function ApplyFriendly(plate, unitToken)
     else
         t.icon:Hide()
         t.border:Hide()
+    end
+    if rt and GetShowFriendlyRaidMarkers() then
+        local mode = coords and "icon" or (showName and "name" or (showSub and "sub" or "frame"))
+        PositionRaidTarget(uf, t, mode)
+    else
+        RestoreRaidTargetLayout(uf)
     end
 end
 
@@ -700,6 +774,10 @@ local function RefreshIconSizes()
     for _, t in pairs(PMM.text) do
         if t.icon then t.icon:SetSize(size, size) end
         if t.border then t.border:SetSize(size + ICON_BORDER * 2, size + ICON_BORDER * 2) end
+        local uf = t.unitFrame
+        if uf and PMM.raidLayoutByFrame[uf] == t and t.raidMode == "icon" then
+            PositionRaidTarget(uf, t, "icon")
+        end
     end
 end
 
@@ -988,6 +1066,18 @@ local function SetupOptions()
         UpdateAllNameplates()
     end)
 
+    local raidMarkerCheck = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
+    raidMarkerCheck:SetPoint("TOPLEFT", playerNameCheck, "TOPLEFT", 265, 0)
+    local raidMarkerText = raidMarkerCheck:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    raidMarkerText:SetPoint("LEFT", raidMarkerCheck, "RIGHT", 4, 0)
+    raidMarkerText:SetText("Show friendly raid markers")
+    raidMarkerCheck:SetScript("OnClick", function(self)
+        if PartyMembersMarkerDB then
+            PartyMembersMarkerDB.showFriendlyRaidMarkers = self:GetChecked() and true or false
+        end
+        UpdateAllNameplates()
+    end)
+
     local sizeSliders = { playerSlider, npcSlider }
     local outlineChecks = { playerOutline, npcOutline }
 
@@ -1009,6 +1099,7 @@ local function SetupOptions()
         end
         playerNameCheck:SetChecked(GetShowPlayerNames())
         playerGuildCheck:SetChecked(GetShowPlayerGuilds())
+        raidMarkerCheck:SetChecked(GetShowFriendlyRaidMarkers())
         instCheck:SetChecked(GetHideFriendlyInInstance())
     end)
 

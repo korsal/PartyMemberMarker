@@ -59,7 +59,8 @@ that one ZIP and select the supported game versions on the CurseForge file page.
 - **Smart name colors** — players tinted by class; friendly NPCs colored by your
   reputation with their faction (green / yellow / red). AFK/DND status prefix
   included.
-- **Cleaner look** — the native raid target marker is hidden on friendly plates.
+- **Cleaner look** — the native raid target marker is hidden on friendly plates
+  by default; an option restores assigned markers when needed.
 - **Auto-disable friendly plates in dungeons/raids** — optional: since the game
   protects (forbids) friendly nameplates inside PvE instances so they can't be
   cleaned up, turn them off automatically on entering and restore your setting on
@@ -86,6 +87,10 @@ that one ZIP and select the supported game versions on the CurseForge file page.
 - **Name text** — font, plus separate name size and outline for players and NPCs.
 - **Show player names / guilds** — hide either line independently; class icons
   remain visible when both are hidden. Both switches are on by default.
+- **Show friendly raid markers** — display assigned skull/cross/star markers on
+  friendly plates. On players with a class badge, the marker sits over its
+  center; otherwise it sits above the name. Off by default to keep the arena
+  view uncluttered.
 - **Auto-disable friendly nameplates when the client blocks marking them with the
   class icon** — turn friendly nameplates off while inside PvE instances (where
   they can't be cleaned up) and restore your previous setting on leaving. **On by
