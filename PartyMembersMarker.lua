@@ -59,6 +59,14 @@ local function GetHideFriendlyInInstance()
     return PartyMembersMarkerDB and PartyMembersMarkerDB.hideFriendlyInInstance
 end
 
+local function GetShowPlayerNames()
+    return not PartyMembersMarkerDB or PartyMembersMarkerDB.showPlayerNames ~= false
+end
+
+local function GetShowPlayerGuilds()
+    return not PartyMembersMarkerDB or PartyMembersMarkerDB.showPlayerGuilds ~= false
+end
+
 -- Name text styling (configurable via the settings panel).
 local NAME_SIZE_MIN = 8
 local NAME_SIZE_MAX = 24
@@ -506,7 +514,10 @@ local function ApplyFriendly(plate, unitToken)
     local t = GetText(plate)
     if not t then return end
 
+    local isPlayer = IsPlayerUnit(unitToken)
+    local showName = not isPlayer or GetShowPlayerNames()
     local subText = GetSubText(unitToken)
+    local showSub = subText and (not isPlayer or GetShowPlayerGuilds())
     -- Choose each line's font independently: a Latin player name may have a
     -- Cyrillic guild name (or the reverse).
     ApplyLabelFonts(t, GetFontFileForText(displayName), GetFontFileForText(subText),
@@ -515,14 +526,31 @@ local function ApplyFriendly(plate, unitToken)
     local r, g, b = GetNameColor(unitToken)
     LabelSetText(t.name, displayName)
     LabelSetColor(t.name, r, g, b)
-    LabelShow(t.name)
+    if showName then LabelShow(t.name) else LabelHide(t.name) end
 
-    if subText then
+    if showSub then
         LabelSetText(t.sub, subText)
         LabelSetColor(t.sub, r, g, b)
         LabelShow(t.sub)
     else
         LabelHide(t.sub)
+    end
+
+    -- Keep the guild and class icon independently positioned when the player
+    -- name is hidden. Neither should rely on a hidden FontString as an anchor.
+    t.sub.main:ClearAllPoints()
+    if showName then
+        t.sub.main:SetPoint("TOP", t.name.main, "BOTTOM", 0, -1)
+    else
+        t.sub.main:SetPoint("CENTER", uf, "CENTER", 0, VERTICAL_OFFSET)
+    end
+    t.icon:ClearAllPoints()
+    if showName then
+        t.icon:SetPoint("BOTTOM", t.name.main, "TOP", 0, ICON_GAP)
+    elseif showSub then
+        t.icon:SetPoint("BOTTOM", t.sub.main, "TOP", 0, ICON_GAP)
+    else
+        t.icon:SetPoint("BOTTOM", uf, "CENTER", 0, VERTICAL_OFFSET + ICON_GAP + NAME_SIZE / 2)
     end
 
     -- Class icon: friendly players in scope, when the class is resolved.
@@ -563,8 +591,8 @@ local function RestorePlate(plate)
     end
 end
 
-local function UpdateNameplate(unitToken)
-    local plate = C_NamePlate.GetNamePlateForUnit(unitToken)
+local function UpdateNameplate(unitToken, knownPlate)
+    local plate = knownPlate or C_NamePlate.GetNamePlateForUnit(unitToken)
     if not plate then return end
     if plate.UnitFrame and plate.UnitFrame:IsForbidden() then return end  -- skip forbidden plates
 
@@ -576,11 +604,16 @@ local function UpdateNameplate(unitToken)
 end
 
 local function UpdateAllNameplates()
+    -- A visible plate does not always expose namePlateUnitToken in Forever.
+    -- Use the tokens saved when the plates appeared so options apply at once.
+    for unit, plate in pairs(PMM.platesByUnit) do
+        if plate then pcall(UpdateNameplate, unit, plate) end
+    end
     for _, plate in pairs(C_NamePlate.GetNamePlates()) do
-        local unit = plate.namePlateUnitToken
+        local unit = plate.namePlateUnitToken or (plate.UnitFrame and plate.UnitFrame.unit)
         -- pcall so one bad plate can't abort the whole refresh (which left
         -- some plates stale when switching the icon scope).
-        if unit then pcall(UpdateNameplate, unit) end
+        if unit then pcall(UpdateNameplate, unit, plate) end
     end
 end
 
@@ -930,6 +963,31 @@ local function SetupOptions()
     local playerOutline = MakeOutlineCheck(playerSlider, GetPlayerOutline, "nameOutlinePlayer")
     local npcOutline    = MakeOutlineCheck(npcSlider, GetNPCOutline, "nameOutlineNPC")
 
+    -- Player text can be hidden independently while the class icon remains.
+    local playerNameCheck = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
+    playerNameCheck:SetPoint("TOPLEFT", npcSlider, "BOTTOMLEFT", -20, -22)
+    local playerNameText = playerNameCheck:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    playerNameText:SetPoint("LEFT", playerNameCheck, "RIGHT", 4, 0)
+    playerNameText:SetText("Show player names")
+    playerNameCheck:SetScript("OnClick", function(self)
+        if PartyMembersMarkerDB then
+            PartyMembersMarkerDB.showPlayerNames = self:GetChecked() and true or false
+        end
+        UpdateAllNameplates()
+    end)
+
+    local playerGuildCheck = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
+    playerGuildCheck:SetPoint("TOPLEFT", playerNameCheck, "BOTTOMLEFT", 0, -4)
+    local playerGuildText = playerGuildCheck:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    playerGuildText:SetPoint("LEFT", playerGuildCheck, "RIGHT", 4, 0)
+    playerGuildText:SetText("Show player guilds")
+    playerGuildCheck:SetScript("OnClick", function(self)
+        if PartyMembersMarkerDB then
+            PartyMembersMarkerDB.showPlayerGuilds = self:GetChecked() and true or false
+        end
+        UpdateAllNameplates()
+    end)
+
     local sizeSliders = { playerSlider, npcSlider }
     local outlineChecks = { playerOutline, npcOutline }
 
@@ -949,6 +1007,8 @@ local function SetupOptions()
         for _, cb in ipairs(outlineChecks) do
             cb:SetChecked(cb.pmmGetter())
         end
+        playerNameCheck:SetChecked(GetShowPlayerNames())
+        playerGuildCheck:SetChecked(GetShowPlayerGuilds())
         instCheck:SetChecked(GetHideFriendlyInInstance())
     end)
 

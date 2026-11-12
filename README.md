@@ -65,8 +65,9 @@ that one ZIP and select the supported game versions on the CurseForge file page.
   cleaned up, turn them off automatically on entering and restore your setting on
   leaving.
 - **In-game options** — class-icon size (with a live preview), icon scope, font,
-  and separate name size + outline for players and NPCs. Cyrillic text uses the
-  matching Cyrillic face of the chosen font.
+  separate name size + outline for players and NPCs, and independent switches
+  for player names and guilds. Cyrillic text uses the matching Cyrillic face of
+  the chosen font.
 
 ## How to use
 
@@ -83,6 +84,8 @@ that one ZIP and select the supported game versions on the CurseForge file page.
 - **Icon size** — class-icon diameter, with a live class-badge preview.
 - **Show class icon for** — All players / Party members / Raid members.
 - **Name text** — font, plus separate name size and outline for players and NPCs.
+- **Show player names / guilds** — hide either line independently; class icons
+  remain visible when both are hidden. Both switches are on by default.
 - **Auto-disable friendly nameplates when the client blocks marking them with the
   class icon** — turn friendly nameplates off while inside PvE instances (where
   they can't be cleaned up) and restore your previous setting on leaving. **On by
