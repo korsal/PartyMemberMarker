@@ -35,8 +35,9 @@ same Lua file and a client-specific TOC.
 
 ## Local installation
 
-Run `./deploy-anniversary.sh` or `./deploy-forever.sh` from this Git checkout to
-copy the Lua file and the matching TOC into the adjacent client AddOns directory.
+Run `./deploy-classic.sh`, `./deploy-anniversary.sh`, or `./deploy-forever.sh`
+from this Git checkout to copy the Lua file and the matching TOC into the
+adjacent client AddOns directory.
 Run the same script again after CurseForge updates the game copy. The checkout
 and its Git history stay outside `AddOns`; the game copy contains only runtime
 files.
@@ -86,6 +87,9 @@ that one ZIP and select the supported game versions on the CurseForge file page.
 - **Icon size / border thickness** — adjust the class-icon diameter and the
   colored ring around it independently, with a live badge preview. Setting
   border thickness to 0 removes the visible ring.
+- **Icon X/Y offset** — move class icons left/right and up/down relative to
+  their usual position above the name. Both offsets default to 0; the border,
+  level badge, and optional raid marker move with the icon.
 - **Show class icon for** — All players / Party members / Raid members.
 - **Show level on class icons** — optional small level badge at the lower-left
   edge of each displayed class icon. Off by default. Adjust its diameter, ring
@@ -93,6 +97,9 @@ that one ZIP and select the supported game versions on the CurseForge file page.
 - **Name text** — font, plus separate name size and outline for players and NPCs.
 - **Show player names / guilds** — hide either line independently; class icons
   remain visible when both are hidden. Both switches are on by default.
+- **Highlight own guild name** — color your guild's name gold on friendly
+  player nameplates. Other guild names keep their usual color. Off by default;
+  requires **Show player guilds**.
 - **Show friendly raid markers** — display assigned skull/cross/star markers on
   friendly plates. On players with a class badge, the marker sits over its
   center; otherwise it sits above the name. Off by default to keep the arena

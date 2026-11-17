@@ -29,10 +29,12 @@ three versions.
 ## Options
 
 *   **Icon size / border thickness** — adjust the class-icon diameter and its colored ring independently, with a live preview.
+*   **Icon X/Y offset** — move class icons relative to their usual position above the name. Both offsets default to 0; the border, level badge, and optional raid marker follow the icon.
 *   **Show class icon for** — All players / Party members / Raid members.
 *   **Show level on class icons** — toggle the small level badge and adjust its size, border thickness, and font size.
 *   **Name text** — choose the **font**, and set the **name size** and **outline** separately for **players** and **NPCs**.
 *   **Show player names / guilds** — hide either line independently; class icons stay visible.
+*   **Highlight own guild name** — color your guild's name gold while leaving other guild names unchanged. Off by default; requires **Show player guilds**.
 *   **Show friendly raid markers** — restore assigned raid markers on friendly plates when needed.
 *   **Auto-disable friendly nameplates when the client blocks marking them with the class icon** — turn friendly nameplates off inside PvE instances and restore your setting on leaving (on by default).
 

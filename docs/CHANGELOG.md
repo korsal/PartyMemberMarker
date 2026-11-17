@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.6.0
+- Added X and Y controls for positioning class icons. Their borders, level badges, and optional raid markers move with them.
+- Added an option to highlight the name of your own guild in gold on friendly player nameplates.
+- Made the options panel scrollable on smaller screens and initialized its labels and preview when it is created.
+- Added a repeatable MoP Classic installation script.
+
+## v1.5.0
+- Added independent switches for player names and guild names, while retaining class icons.
+- Added optional friendly raid markers and an adjustable class-icon border.
+- Added optional player level badges with size, border, and font controls.
+
 ## v1.4.0
 - Added WoW Forever 1.60.1 support alongside Mists of Pandaria Classic 5.5.4 and Burning Crusade Classic Anniversary 2.5.6.
 - Accounted for Forever's protected unit data and new level frame on nameplates.

@@ -52,6 +52,8 @@ local ICON_SIZE_MIN = 16
 local ICON_SIZE_MAX = 96
 local ICON_BORDER_MIN = 0
 local ICON_BORDER_MAX = 16
+local ICON_OFFSET_MIN = -100
+local ICON_OFFSET_MAX = 100
 local LEVEL_BADGE_SIZE_MIN = 18
 local LEVEL_BADGE_SIZE_MAX = 48
 local LEVEL_BADGE_BORDER_MIN = 0
@@ -66,6 +68,16 @@ end
 
 local function GetIconBorder()
     return (PartyMembersMarkerDB and PartyMembersMarkerDB.iconBorder) or ICON_BORDER
+end
+
+local function GetIconOffsetX()
+    local value = PartyMembersMarkerDB and PartyMembersMarkerDB.iconOffsetX
+    return type(value) == "number" and value or 0
+end
+
+local function GetIconOffsetY()
+    local value = PartyMembersMarkerDB and PartyMembersMarkerDB.iconOffsetY
+    return type(value) == "number" and value or 0
 end
 
 local function GetLevelBadgeSize(iconSize)
@@ -96,6 +108,10 @@ end
 
 local function GetShowPlayerGuilds()
     return not PartyMembersMarkerDB or PartyMembersMarkerDB.showPlayerGuilds ~= false
+end
+
+local function GetHighlightOwnGuildName()
+    return PartyMembersMarkerDB and PartyMembersMarkerDB.highlightOwnGuildName == true
 end
 
 local function GetShowFriendlyRaidMarkers()
@@ -515,7 +531,7 @@ local function GetText(plate)
     local icon = holder:CreateTexture(nil, "ARTWORK")
     icon:SetSize(iconSize, iconSize)
     icon:SetTexture("Interface\\TargetingFrame\\UI-Classes-Circles")
-    icon:SetPoint("BOTTOM", name.main, "TOP", 0, ICON_GAP)
+    icon:SetPoint("BOTTOM", name.main, "TOP", GetIconOffsetX(), ICON_GAP + GetIconOffsetY())
     icon:Hide()
 
     border:SetPoint("CENTER", icon, "CENTER", 0, 0)
@@ -700,7 +716,12 @@ local function ApplyFriendly(plate, unitToken)
 
     if showSub then
         LabelSetText(t.sub, subText)
-        LabelSetColor(t.sub, r, g, b)
+        if isPlayer and GetHighlightOwnGuildName() and UnitIsInMyGuild
+            and PublicValue(UnitIsInMyGuild(unitToken)) == true then
+            LabelSetColor(t.sub, 1, 0.82, 0.2)
+        else
+            LabelSetColor(t.sub, r, g, b)
+        end
         LabelShow(t.sub)
     else
         LabelHide(t.sub)
@@ -715,12 +736,14 @@ local function ApplyFriendly(plate, unitToken)
         t.sub.main:SetPoint("CENTER", uf, "CENTER", 0, VERTICAL_OFFSET)
     end
     t.icon:ClearAllPoints()
+    local iconX, iconY = GetIconOffsetX(), GetIconOffsetY()
     if showName then
-        t.icon:SetPoint("BOTTOM", t.name.main, "TOP", 0, ICON_GAP)
+        t.icon:SetPoint("BOTTOM", t.name.main, "TOP", iconX, ICON_GAP + iconY)
     elseif showSub then
-        t.icon:SetPoint("BOTTOM", t.sub.main, "TOP", 0, ICON_GAP)
+        t.icon:SetPoint("BOTTOM", t.sub.main, "TOP", iconX, ICON_GAP + iconY)
     else
-        t.icon:SetPoint("BOTTOM", uf, "CENTER", 0, VERTICAL_OFFSET + ICON_GAP + NAME_SIZE / 2)
+        t.icon:SetPoint("BOTTOM", uf, "CENTER", iconX,
+            VERTICAL_OFFSET + ICON_GAP + NAME_SIZE / 2 + iconY)
     end
 
     -- Class icon: friendly players in scope, when the class is resolved.
@@ -938,16 +961,29 @@ local function SetupOptions()
     local panel = CreateFrame("Frame")
     panel.name = "PartyMembersMarker"
 
-    local title = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
+    -- The settings canvas is shorter than our controls on smaller screens.
+    -- Keep the controls on a scroll child so the final checkboxes stay inside
+    -- the window and the scrollbar has room on the right.
+    local scroll = CreateFrame("ScrollFrame", nil, panel, "UIPanelScrollFrameTemplate")
+    scroll:SetPoint("TOPLEFT", panel, "TOPLEFT", 0, -2)
+    scroll:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -28, 2)
+    local body = CreateFrame("Frame", nil, scroll)
+    body:SetSize(600, 940)
+    scroll:SetScrollChild(body)
+    scroll:HookScript("OnSizeChanged", function(self)
+        if self:GetWidth() > 1 then body:SetWidth(self:GetWidth()) end
+    end)
+
+    local title = body:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
     title:SetPoint("TOPLEFT", 16, -16)
     title:SetText("PartyMembersMarker")
 
     -- Live preview badge (uses the player's own class). Positioned to the
     -- right of the slider below (anchored after the slider is created).
-    local previewLabel = panel:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    local previewLabel = body:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     previewLabel:SetText("Preview")
 
-    local preview = CreateFrame("Frame", nil, panel)
+    local preview = CreateFrame("Frame", nil, body)
     preview:SetSize(ICON_SIZE_MAX + ICON_BORDER_MAX * 2, ICON_SIZE_MAX + ICON_BORDER_MAX * 2)
 
     local pBorder = preview:CreateTexture(nil, "ARTWORK", nil, -1)
@@ -975,6 +1011,7 @@ local function SetupOptions()
         local _, class = UnitClass("player")
         local coords = class and CLASS_ICON_TCOORDS and CLASS_ICON_TCOORDS[class]
         if coords then pIcon:SetTexCoord(coords[1], coords[2], coords[3], coords[4]) end
+        pIcon:SetShown(coords ~= nil)
         local c = class and (CUSTOM_CLASS_COLORS or RAID_CLASS_COLORS)[class]
         if c then pBorder:SetVertexColor(c.r, c.g, c.b) end
         pIcon:SetSize(size, size)
@@ -999,7 +1036,7 @@ local function SetupOptions()
     end
 
     -- Icon size slider with +/- arrow steppers.
-    local slider = CreateFrame("Slider", "PMMIconSizeSlider", panel, "OptionsSliderTemplate")
+    local slider = CreateFrame("Slider", "PMMIconSizeSlider", body, "OptionsSliderTemplate")
     slider:SetPoint("TOPLEFT", title, "BOTTOMLEFT", 24, -48)
     slider:SetWidth(220)
     slider:SetMinMaxValues(ICON_SIZE_MIN, ICON_SIZE_MAX)
@@ -1031,7 +1068,7 @@ local function SetupOptions()
 
     -- The ring is a larger circle behind the class icon. Its extra radius is
     -- the visible thickness, so changing it does not resize the icon itself.
-    local borderSlider = CreateFrame("Slider", "PMMIconBorderSlider", panel, "OptionsSliderTemplate")
+    local borderSlider = CreateFrame("Slider", "PMMIconBorderSlider", body, "OptionsSliderTemplate")
     borderSlider:SetPoint("TOPLEFT", slider, "BOTTOMLEFT", 0, -38)
     borderSlider:SetWidth(220)
     borderSlider:SetMinMaxValues(ICON_BORDER_MIN, ICON_BORDER_MAX)
@@ -1056,11 +1093,11 @@ local function SetupOptions()
     end):SetPoint("LEFT", borderSlider, "RIGHT", 4, 0)
 
     -- Icon scope: show the class icon for all / party / raid (radio group).
-    local scopeHeader = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    local scopeHeader = body:CreateFontString(nil, "ARTWORK", "GameFontNormal")
     scopeHeader:SetPoint("TOPLEFT", borderSlider, "BOTTOMLEFT", 0, -40)
     scopeHeader:SetText("Show class icon for:")
 
-    local levelCheck = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
+    local levelCheck = CreateFrame("CheckButton", nil, body, "UICheckButtonTemplate")
     levelCheck:SetPoint("TOPLEFT", scopeHeader, "TOPLEFT", 265, 4)
     local levelText = levelCheck:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     levelText:SetPoint("LEFT", levelCheck, "RIGHT", 4, 0)
@@ -1074,7 +1111,7 @@ local function SetupOptions()
     end)
 
     local function MakeLevelSlider(globalName, anchor, yOffset, label, minValue, maxValue, getter, dbKey)
-        local s = CreateFrame("Slider", globalName, panel, "OptionsSliderTemplate")
+        local s = CreateFrame("Slider", globalName, body, "OptionsSliderTemplate")
         s:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", anchor == levelCheck and 18 or 0, yOffset)
         s:SetWidth(180)
         s:SetMinMaxValues(minValue, maxValue)
@@ -1127,7 +1164,7 @@ local function SetupOptions()
 
     local prev = scopeHeader
     for i, opt in ipairs(SCOPE_OPTIONS) do
-        local b = CreateFrame("CheckButton", nil, panel, "UIRadioButtonTemplate")
+        local b = CreateFrame("CheckButton", nil, body, "UIRadioButtonTemplate")
         b.pmmValue = opt.value
         if i == 1 then
             b:SetPoint("TOPLEFT", scopeHeader, "BOTTOMLEFT", 4, -8)
@@ -1151,7 +1188,7 @@ local function SetupOptions()
     end
 
     -- Hide friendly nameplates inside instances (where they're protected).
-    local instCheck = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
+    local instCheck = CreateFrame("CheckButton", nil, body, "UICheckButtonTemplate")
     instCheck:SetPoint("TOPLEFT", levelFontSlider, "BOTTOMLEFT", -283, -22)
     local instText = instCheck:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     instText:SetPoint("LEFT", instCheck, "RIGHT", 4, 0)
@@ -1167,15 +1204,15 @@ local function SetupOptions()
     end)
 
     -- ===== Name text styling =====
-    local textHeader = panel:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    local textHeader = body:CreateFontString(nil, "ARTWORK", "GameFontNormal")
     textHeader:SetPoint("TOPLEFT", instCheck, "BOTTOMLEFT", 0, -16)
     textHeader:SetText("Name text")
 
     -- Font dropdown
-    local fontLabel = panel:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+    local fontLabel = body:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
     fontLabel:SetPoint("TOPLEFT", textHeader, "BOTTOMLEFT", 0, -8)
     fontLabel:SetText("Font")
-    local fontDrop = CreateFrame("Frame", "PMMFontDropdown", panel, "UIDropDownMenuTemplate")
+    local fontDrop = CreateFrame("Frame", "PMMFontDropdown", body, "UIDropDownMenuTemplate")
     fontDrop:SetPoint("TOPLEFT", fontLabel, "BOTTOMLEFT", -16, -2)
     UIDropDownMenu_SetWidth(fontDrop, 150)
     UIDropDownMenu_Initialize(fontDrop, function(_, level)
@@ -1194,7 +1231,7 @@ local function SetupOptions()
 
     -- Separate name-size sliders for players and NPCs.
     local function MakeSizeSlider(globalName, anchor, xoff, yoff, labelText, getter, dbKey)
-        local s = CreateFrame("Slider", globalName, panel, "OptionsSliderTemplate")
+        local s = CreateFrame("Slider", globalName, body, "OptionsSliderTemplate")
         s:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", xoff, yoff)
         s:SetWidth(220)
         s:SetMinMaxValues(NAME_SIZE_MIN, NAME_SIZE_MAX)
@@ -1226,7 +1263,7 @@ local function SetupOptions()
 
     -- An "Outline" checkbox to the right of each size slider (per unit type).
     local function MakeOutlineCheck(anchorSlider, getter, dbKey)
-        local cb = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
+        local cb = CreateFrame("CheckButton", nil, body, "UICheckButtonTemplate")
         cb:SetPoint("LEFT", anchorSlider, "RIGHT", 44, 0)
         local txt = cb:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
         txt:SetPoint("LEFT", cb, "RIGHT", 2, 0)
@@ -1245,7 +1282,7 @@ local function SetupOptions()
     local npcOutline    = MakeOutlineCheck(npcSlider, GetNPCOutline, "nameOutlineNPC")
 
     -- Player text can be hidden independently while the class icon remains.
-    local playerNameCheck = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
+    local playerNameCheck = CreateFrame("CheckButton", nil, body, "UICheckButtonTemplate")
     playerNameCheck:SetPoint("TOPLEFT", npcSlider, "BOTTOMLEFT", -20, -22)
     local playerNameText = playerNameCheck:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     playerNameText:SetPoint("LEFT", playerNameCheck, "RIGHT", 4, 0)
@@ -1257,7 +1294,7 @@ local function SetupOptions()
         UpdateAllNameplates()
     end)
 
-    local playerGuildCheck = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
+    local playerGuildCheck = CreateFrame("CheckButton", nil, body, "UICheckButtonTemplate")
     playerGuildCheck:SetPoint("TOPLEFT", playerNameCheck, "BOTTOMLEFT", 0, -4)
     local playerGuildText = playerGuildCheck:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     playerGuildText:SetPoint("LEFT", playerGuildCheck, "RIGHT", 4, 0)
@@ -1269,7 +1306,19 @@ local function SetupOptions()
         UpdateAllNameplates()
     end)
 
-    local raidMarkerCheck = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
+    local ownGuildCheck = CreateFrame("CheckButton", nil, body, "UICheckButtonTemplate")
+    ownGuildCheck:SetPoint("TOPLEFT", playerGuildCheck, "BOTTOMLEFT", 0, -4)
+    local ownGuildText = ownGuildCheck:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    ownGuildText:SetPoint("LEFT", ownGuildCheck, "RIGHT", 4, 0)
+    ownGuildText:SetText("Highlight own guild name")
+    ownGuildCheck:SetScript("OnClick", function(self)
+        if PartyMembersMarkerDB then
+            PartyMembersMarkerDB.highlightOwnGuildName = self:GetChecked() and true or false
+        end
+        UpdateAllNameplates()
+    end)
+
+    local raidMarkerCheck = CreateFrame("CheckButton", nil, body, "UICheckButtonTemplate")
     raidMarkerCheck:SetPoint("TOPLEFT", playerNameCheck, "TOPLEFT", 265, 0)
     local raidMarkerText = raidMarkerCheck:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     raidMarkerText:SetPoint("LEFT", raidMarkerCheck, "RIGHT", 4, 0)
@@ -1281,16 +1330,60 @@ local function SetupOptions()
         UpdateAllNameplates()
     end)
 
+    -- Keep the existing controls in place. The icon position controls live at
+    -- the end of the scroll area, where they cannot cover the class preview.
+    local offsetHeader = body:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    offsetHeader:SetPoint("TOPLEFT", ownGuildCheck, "BOTTOMLEFT", 24, -22)
+    offsetHeader:SetText("Class icon position")
+
+    local function MakeOffsetSlider(globalName, anchor, label, getter, dbKey)
+        local s = CreateFrame("Slider", globalName, body, "OptionsSliderTemplate")
+        s:SetPoint("TOPLEFT", anchor, "BOTTOMLEFT", 0, -32)
+        s:SetWidth(220)
+        s:SetMinMaxValues(ICON_OFFSET_MIN, ICON_OFFSET_MAX)
+        s:SetValueStep(1)
+        s:SetObeyStepOnDrag(true)
+        _G[globalName .. "Low"]:SetText(tostring(ICON_OFFSET_MIN))
+        _G[globalName .. "High"]:SetText(tostring(ICON_OFFSET_MAX))
+        local valueText = _G[globalName .. "Text"]
+        s:SetScript("OnValueChanged", function(_, value)
+            value = math.floor(value + 0.5)
+            valueText:SetText(label .. ": " .. value)
+            if PartyMembersMarkerDB then
+                PartyMembersMarkerDB[dbKey] = value
+                UpdateAllNameplates()
+            end
+        end)
+        MakeStepper(s, true, function()
+            s:SetValue(math.max(ICON_OFFSET_MIN, getter() - 1))
+        end):SetPoint("RIGHT", s, "LEFT", -4, 0)
+        MakeStepper(s, false, function()
+            s:SetValue(math.min(ICON_OFFSET_MAX, getter() + 1))
+        end):SetPoint("LEFT", s, "RIGHT", 4, 0)
+        return s
+    end
+
+    local offsetXSlider = MakeOffsetSlider("PMMIconOffsetXSlider", offsetHeader,
+        "Icon X offset", GetIconOffsetX, "iconOffsetX")
+    local offsetYSlider = MakeOffsetSlider("PMMIconOffsetYSlider", offsetXSlider,
+        "Icon Y offset", GetIconOffsetY, "iconOffsetY")
+
     local sizeSliders = { playerSlider, npcSlider }
     local outlineChecks = { playerOutline, npcOutline }
 
-    panel:SetScript("OnShow", function()
+    local function RefreshOptions()
+        local top, bottom = body:GetTop(), offsetYSlider:GetBottom()
+        if top and bottom then body:SetHeight(top - bottom + 24) end
         local size = GetIconSize()
         slider:SetValue(size)
         PMMIconSizeSliderText:SetText("Icon size: " .. size)
         local border = GetIconBorder()
         borderSlider:SetValue(border)
         PMMIconBorderSliderText:SetText("Border thickness: " .. border)
+        offsetXSlider:SetValue(GetIconOffsetX())
+        offsetYSlider:SetValue(GetIconOffsetY())
+        PMMIconOffsetXSliderText:SetText("Icon X offset: " .. GetIconOffsetX())
+        PMMIconOffsetYSliderText:SetText("Icon Y offset: " .. GetIconOffsetY())
         syncingLevelSliders = true
         levelSizeSlider:SetValue(GetLevelBadgeSize(size))
         levelBorderSlider:SetValue(GetLevelBadgeBorder())
@@ -1313,13 +1406,22 @@ local function SetupOptions()
         end
         playerNameCheck:SetChecked(GetShowPlayerNames())
         playerGuildCheck:SetChecked(GetShowPlayerGuilds())
+        ownGuildCheck:SetChecked(GetHighlightOwnGuildName())
         levelCheck:SetChecked(GetShowPlayerLevels())
         raidMarkerCheck:SetChecked(GetShowFriendlyRaidMarkers())
         instCheck:SetChecked(GetHideFriendlyInInstance())
+    end
+
+    panel:SetScript("OnShow", function()
+        RefreshOptions()
+        scroll:SetVerticalScroll(0)
     end)
 
     optionsCategory = Settings.RegisterCanvasLayoutCategory(panel, panel.name)
     Settings.RegisterAddOnCategory(optionsCategory)
+    -- The canvas may already be visible when it is registered. Initialize
+    -- slider text and preview explicitly instead of relying on OnShow.
+    RefreshOptions()
 end
 
 local function OpenOptions()
@@ -1336,6 +1438,8 @@ frame:RegisterEvent("NAME_PLATE_UNIT_ADDED")
 frame:RegisterEvent("NAME_PLATE_UNIT_REMOVED")
 frame:RegisterEvent("PLAYER_FLAGS_CHANGED")
 frame:RegisterEvent("GROUP_ROSTER_UPDATE")
+frame:RegisterEvent("PLAYER_GUILD_UPDATE")
+frame:RegisterEvent("GUILD_ROSTER_UPDATE")
 frame:RegisterEvent("UNIT_NAME_UPDATE")
 frame:RegisterEvent("UNIT_LEVEL")
 frame:RegisterEvent("UPDATE_FACTION")
@@ -1397,8 +1501,9 @@ frame:SetScript("OnEvent", function(self, event, unit)
             RestorePlate(plate)
         end
 
-    elseif event == "PLAYER_FLAGS_CHANGED" or event == "GROUP_ROSTER_UPDATE" then
-        -- AFK/DND toggled, or party/raid roster changed; refresh visible plates.
+    elseif event == "PLAYER_FLAGS_CHANGED" or event == "GROUP_ROSTER_UPDATE"
+        or event == "PLAYER_GUILD_UPDATE" or event == "GUILD_ROSTER_UPDATE" then
+        -- Player status, group, or guild membership changed; refresh visible plates.
         UpdateAllNameplates()
 
     elseif event == "UNIT_NAME_UPDATE" or event == "UNIT_LEVEL" then
